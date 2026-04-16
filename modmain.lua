@@ -10,7 +10,7 @@ local function Import(modulename)
 	end
 end
 
-Upvaluehelper = Import(MODROOT .. "scripts/bbgoat_upvaluehelper.lua") -- 使用Import而不是require，防止引用到其它模组的同名文件
+Upvaluehelper = Import(MODROOT .. "bbgoat_upvaluehelper.lua")
 
 local function IsDefaultScreen()
     local active_screen = GLOBAL.TheFrontEnd:GetActiveScreen()
