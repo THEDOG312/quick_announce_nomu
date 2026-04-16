@@ -110,21 +110,17 @@ AddSimPostInit(function()
     local need_update = false
     -- 更新预设
     if (GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.version) <= 1 then
-        if GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.SEASON and GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.SEASON.FORMATS then
+        if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "CURRENT_SCHEME", "data", "SEASON", "FORMATS") then
             GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.SEASON.FORMATS.DEFAULT = STRINGS.DEFAULT_NOMU_QA.SEASON.FORMATS.DEFAULT
         end
-        if GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.WORLD_TEMPERATURE_AND_RAIN and GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.WORLD_TEMPERATURE_AND_RAIN.FORMATS then
+        if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "CURRENT_SCHEME", "data", "WORLD_TEMPERATURE_AND_RAIN", "FORMATS") then
             GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN = STRINGS.DEFAULT_NOMU_QA.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN
         end
     end
 
     if (GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.version) <= 1.1 then
         need_update = true
-        if GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.HEALTH and
-            GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.HEALTH.MAPPINGS and
-            GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.HEALTH.MAPPINGS.WORMWOOD and
-            GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.HEALTH.MAPPINGS.WORMWOOD.MESSAGE
-        then
+        if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "CURRENT_SCHEME", "data", "HEALTH", "MAPPINGS", "WORMWOOD", "MESSAGE") then
             GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL = STRINGS.DEFAULT_NOMU_QA.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL
         end
     end
@@ -133,20 +129,16 @@ AddSimPostInit(function()
         print("[快捷宣告(NoMu)] 正在更新自定义宣告内容..")
         for k,v in pairs (GLOBAL.NOMU_QA.DATA.SCHEMES) do
             if v.version <= 1 then
-                if GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.SEASON and GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.SEASON.FORMATS then
+                if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "SCHEMES", k, "data", "SEASON", "FORMATS") then
                     GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.SEASON.FORMATS.DEFAULT = STRINGS.DEFAULT_NOMU_QA.SEASON.FORMATS.DEFAULT
                 end
-                if GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.WORLD_TEMPERATURE_AND_RAIN and GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.WORLD_TEMPERATURE_AND_RAIN.FORMATS then
+                if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "SCHEMES", k, "data", "WORLD_TEMPERATURE_AND_RAIN", "FORMATS") then
                     GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN = STRINGS.DEFAULT_NOMU_QA.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN
                 end
             end
 
             if v.version <= 1.1 then
-                if GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.HEALTH and
-                    GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.HEALTH.MAPPINGS and
-                    GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.HEALTH.MAPPINGS.WORMWOOD and
-                    GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.HEALTH.MAPPINGS.WORMWOOD.MESSAGE
-                then
+                if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "SCHEMES", k, "data", "HEALTH", "MAPPINGS", "WORMWOOD", "MESSAGE") then
                     GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL = STRINGS.DEFAULT_NOMU_QA.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL
                 end
 
@@ -554,38 +546,38 @@ local function OnHUDMouseButton(HUD)
 end
 
 -- WX78：芯片
-local GetModuleDefinitionFromNetID = require("wx78_moduledefs").GetModuleDefinitionFromNetID
-AddClassPostConstruct('widgets/upgrademodulesdisplay', function(UpgradeModulesDisplay)
-    local oldOnModuleAdded = UpgradeModulesDisplay.OnModuleAdded
-    function UpgradeModulesDisplay:OnModuleAdded(moduledefinition_index, ...)
-        oldOnModuleAdded(self, moduledefinition_index, ...)
-        local module_def = GetModuleDefinitionFromNetID(moduledefinition_index)
-        if module_def == nil then
-            return
-        end
-        local modname = module_def.name
-        local new_chip = self.chip_objectpool[self.chip_poolindex - 1]
-        new_chip.modname = modname
-    end
+-- local GetModuleDefinitionFromNetID = require("wx78_moduledefs").GetModuleDefinitionFromNetID
+-- AddClassPostConstruct('widgets/upgrademodulesdisplay', function(UpgradeModulesDisplay)
+--     local oldOnModuleAdded = UpgradeModulesDisplay.OnModuleAdded
+--     function UpgradeModulesDisplay:OnModuleAdded(moduledefinition_index, ...)
+--         oldOnModuleAdded(self, moduledefinition_index, ...)
+--         local module_def = GetModuleDefinitionFromNetID(moduledefinition_index)
+--         if module_def == nil then
+--             return
+--         end
+--         local modname = module_def.name
+--         local new_chip = self.chip_objectpool[self.chip_poolindex - 1]
+--         new_chip.modname = modname
+--     end
 
-    for _, chip in ipairs(UpgradeModulesDisplay.chip_objectpool) do
-        local oldOnControl = chip.OnControl
-        function chip:OnControl(control, down, ...)
-            if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-                local name = self.modname
-                local num = 0
-                for _idx, _chip in ipairs(UpgradeModulesDisplay.chip_objectpool) do
-                    if _idx < UpgradeModulesDisplay.chip_poolindex and _chip.modname == name then
-                        num = num + 1
-                    end
-                end
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.ENERGY.FORMATS.CHIP, { ITEM = STRINGS.NAMES['WX78MODULE_' .. name:upper()], NUM = num }))
-            elseif not TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-                return oldOnControl(self, control, down, ...)
-            end
-        end
-    end
-end)
+--     for _, chip in ipairs(UpgradeModulesDisplay.chip_objectpool) do
+--         local oldOnControl = chip.OnControl
+--         function chip:OnControl(control, down, ...)
+--             if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
+--                 local name = self.modname
+--                 local num = 0
+--                 for _idx, _chip in ipairs(UpgradeModulesDisplay.chip_objectpool) do
+--                     if _idx < UpgradeModulesDisplay.chip_poolindex and _chip.modname == name then
+--                         num = num + 1
+--                     end
+--                 end
+--                 return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.ENERGY.FORMATS.CHIP, { ITEM = STRINGS.NAMES['WX78MODULE_' .. name:upper()], NUM = num }))
+--             elseif not TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
+--                 return oldOnControl(self, control, down, ...)
+--             end
+--         end
+--     end
+-- end)
 
 local needs_strings = {
     NEEDSCIENCEMACHINE = "RESEARCHLAB",

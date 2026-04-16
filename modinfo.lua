@@ -39,7 +39,8 @@ WX78电路和芯片宣告
 兼容信息提示：礼物包装、暖石温度、食物剩余保鲜时间
 ]]
 
-version = "0.8124.04"
+-- version = "0.8124.04" -- 冰冰羊：这个版本号我真的看不懂是什么意思，也不知道要怎么加数字
+version = "2026-04-17"
 
 folder_name = folder_name or "quick_announce_nomu"
 if not folder_name:find("workshop-") then
