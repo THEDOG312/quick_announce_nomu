@@ -1,5 +1,5 @@
 name = "快捷宣告(NoMu)"
-author = "NoMu，冰冰羊"
+author = "NoMu，冰冰羊，THEDOG"
 description = [[
 - 修改自“快捷宣告 - Shang 完美汉化”（https://steamcommunity.com/sharedfiles/filedetails/?id=610528767）
 - 兼容新版本的制作栏
@@ -40,7 +40,7 @@ WX78电路和芯片宣告
 ]]
 
 -- version = "0.8124.04" -- 冰冰羊：这个版本号我真的看不懂是什么意思，也不知道要怎么加数字
-version = "2026-04-17"
+version = "2026-05-8"
 
 folder_name = folder_name or "quick_announce_nomu"
 if not folder_name:find("workshop-") then
@@ -50,7 +50,7 @@ end
 api_version = 10
 
 dst_compatible = true
-priority = -10000001
+priority = -2
 all_clients_require_mod = false
 client_only_mod = true
 server_filter_tags = {}
@@ -58,23 +58,116 @@ server_filter_tags = {}
 icon_atlas = "modicon.xml"
 icon = "modicon.tex"
 
-local key_list = { "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "TAB", "CAPSLOCK", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL", "LALT", "RALT", "ALT", "CTRL", "SHIFT", "SPACE", "ENTER", "ESCAPE", "MINUS", "EQUALS", "BACKSPACE", "PERIOD", "SLASH", "LEFTBRACKET", "BACKSLASH", "RIGHTBRACKET", "TILDE", "PRINT", "SCROLLOCK", "PAUSE", "INSERT", "HOME", "DELETE", "END", "PAGEUP", "PAGEDOWN", "UP", "DOWN", "LEFT", "RIGHT", "KP_DIVIDE", "KP_MULTIPLY", "KP_PLUS", "KP_MINUS", "KP_ENTER", "KP_PERIOD", "KP_EQUALS" }
-local key_options = {}
-
-for i = 1, #key_list do
-    key_options[i] = { description = key_list[i], data = "KEY_" .. key_list[i] }
+local function addTitle(title)
+	return {
+		name = "huxi",
+		label = title,
+		options = {
+			{ description = "", data = 0 },
+		},
+		default = 0,
+	}
 end
 
-key_options[#key_list + 1] = {
-    description = '-', data = 'KEY_MINUS'
+local LMB = "\238\132\128"
+local RMB = "\238\132\129"
+
+local tof = {
+	{ description = "开启", data = true, },
+	{ description = "关闭", data = false, },
 }
+local function AddOpt(desc, data, hover)
+	return { description = desc, data = data, hover = hover }
+end
+local theKeys = {
+	AddOpt("关闭", false),
+	AddOpt("B", 98),
+	AddOpt("C", 99),
+	AddOpt("G", 103),
+	AddOpt("H", 104),
+	AddOpt("I", 105, "该项是饥荒检查自身皮肤的默认按键, 不怕冲突可以选"),
+	AddOpt("J", 106),
+	AddOpt("K", 107),
+	AddOpt("L", 108),
+	AddOpt("N", 110),
+	AddOpt("O", 111),
+	AddOpt("P", 112),
+	AddOpt("R", 114),
+	AddOpt("T", 116),
+	AddOpt("V", 118),
+	AddOpt("X", 120),
+	AddOpt("Z", 122),
+	AddOpt("减号-", 45, "该项是OB视角的默认键位, 使用此快捷键请关闭OB视角"),
+	AddOpt("加号+", 61, "该项是OB视角的默认键位, 使用此快捷键请关闭OB视角"),
+	AddOpt("鼠标 侧键A", 1005, "不同鼠标可能不生效"),
+	AddOpt("鼠标 侧键B", 1006, "不同鼠标可能不生效"),
+	AddOpt("关闭", false, " ↑↑↑ 上面不是有关闭按钮嘛 ↑↑↑ ,干嘛要在这里关"),
+	AddOpt("<", 44, "小于号或者逗号"),
+	AddOpt(">", 46, "大于号或者小数点"),
+	AddOpt(":", 59, "冒号或者分号"),
+	AddOpt("'", 39, "单引号或者双引号"),
+	AddOpt("[", 91, "左括号"),
+	AddOpt("]", 93, "右括号"),
+	AddOpt("\\", 92, "右斜杠"),
+	AddOpt("F1", 282),
+	AddOpt("F2", 283),
+	AddOpt("F3", 284),
+	AddOpt("F4", 285),
+	AddOpt("F5", 286),
+	AddOpt("F6", 287),
+	AddOpt("F7", 288),
+	AddOpt("F8", 289),
+	AddOpt("F9", 290),
+	AddOpt("F10", 291),
+	AddOpt("F11", 292),
+	AddOpt("方向键(↑)", 273),
+	AddOpt("方向键(↓)", 274),
+	AddOpt("方向键(←)", 276),
+	AddOpt("方向键(→)", 275),
+	AddOpt("关闭", false, " ↑↑↑ 上面不是有关闭按钮嘛 ↑↑↑ ,干嘛要在这里关"),
+	AddOpt("PageUp", 280, "PageUp"),
+	AddOpt("PageDown", 281, "PageDown"),
+	AddOpt("Home", 278, "Home"),
+	AddOpt("Insert", 277, "Insert"),
+	AddOpt("Delete", 127, "Delete"),
+	AddOpt("End", 279, "End"),
+	AddOpt("Pause", 19, "Pause"),
+	AddOpt("Scroll Lock", 145, "Scroll Lock"),
+	AddOpt("CAPSLOCK大写锁定", 301, "CAPSLOCK大写锁定"),
+	AddOpt("左ALT", 308, "游戏默认的检查键, 请确保不冲突再使用此按键"),
+	AddOpt("右ALT", 307, "游戏默认的检查键, 请确保不冲突再使用此按键"),
+	AddOpt("左CTRL", 306, "左CTRL"),
+        AddOpt("右CTRL", 305, "右CTRL"),
+        AddOpt("左Shift", 304, "左Shift"),
+	AddOpt("右Shift", 303, "右Shift"),
+	AddOpt("小键盘0", 256, "小键盘0"),
+	AddOpt("小键盘1", 257, "小键盘1"),
+	AddOpt("小键盘2", 258, "小键盘2"),
+	AddOpt("小键盘3", 259, "小键盘3"),
+	AddOpt("小键盘4", 260, "小键盘4"),
+	AddOpt("小键盘5", 261, "小键盘5"),
+	AddOpt("小键盘6", 262, "小键盘6"),
+	AddOpt("小键盘7", 263, "小键盘7"),
+	AddOpt("小键盘8", 264, "小键盘8"),
+	AddOpt("小键盘9", 265, "小键盘9"),
+	AddOpt("小键盘 .", 266, "小键盘 ."),
+	AddOpt("小键盘 /", 267, "小键盘 /"),
+	AddOpt("小键盘 *", 268, "小键盘 *"),
+	AddOpt("小键盘 -", 269, "小键盘 -"),
+	AddOpt("小键盘 +", 270, "小键盘 +"),
+       	AddOpt("关闭", false, " ↑↑↑ 上面不是有关闭按钮嘛 ↑↑↑ ,干嘛要在这里关"),
+}
+local theBoardKeys = { AddOpt("功能面板", "biubiu", "将该功能在群鸟面板显示/需开启群鸟绘卷") }
+for i = 2, #theKeys + 1 do
+	theBoardKeys[i] = theKeys[i - 1]
+end
+
 
 configuration_options = {
     {
-        name = "key_toggle",
+        name = "announcekey_toggle",
         label = "快捷键（Shortcut）",
-        options = key_options,
-        default = "KEY_J",
-        is_keybind = true, -- 兼容配置扩展模组
-    },
+        options = theBoardKeys,
+	default = 106,
+}
 }

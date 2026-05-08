@@ -1,1201 +1,2440 @@
-GLOBAL.setmetatable(env, { __index = function(_, k)
-    return GLOBAL.rawget(GLOBAL, k)
-end })
+-- [1] 初始化
+GLOBAL.setmetatable(env, { __index = function(_, k) return GLOBAL.rawget(GLOBAL, k) end })
 
+-- 导入其他 Lua 文件的辅助函数
 local function Import(modulename)
-	local f = GLOBAL.kleiloadlua(modulename)
-	if f and type(f) == "function" then
+    local f = GLOBAL.kleiloadlua(modulename)
+    if f and type(f) == "function" then
         setfenv(f, GLOBAL)
         return f()
-	end
+    end
 end
 
-Upvaluehelper = Import(MODROOT .. "bbgoat_upvaluehelper.lua")
+Upvaluehelper = Import(MODROOT .. "scripts/bbgoat_upvaluehelper.lua")
 
+-- 深拷贝函数，用于安全地复制 Table
+local function DeepCopy(orig, copies)
+    copies = copies or {}
+    local orig_type = type(orig)
+    local copy
+    
+    if orig_type == 'table' then
+        if copies[orig] then
+            copy = copies[orig]
+        else
+            copy = {}
+            copies[orig] = copy
+            for orig_key, orig_value in next, orig, nil do
+                copy[DeepCopy(orig_key, copies)] = DeepCopy(orig_value, copies)
+            end
+            setmetatable(copy, DeepCopy(getmetatable(orig), copies))
+        end
+    else
+        copy = orig
+    end
+    
+    return copy
+end
+
+-- 检查当前是否在游戏主界面 (HUD) 且没有在打字
 local function IsDefaultScreen()
     local active_screen = GLOBAL.TheFrontEnd:GetActiveScreen()
     local screen = active_screen and active_screen.name or ""
-    return screen:find("HUD") ~= nil and GLOBAL.ThePlayer ~= nil and not GLOBAL.ThePlayer.HUD:IsChatInputScreenOpen() and not GLOBAL.ThePlayer.HUD.writeablescreen and not
-    (ThePlayer.HUD.controls and ThePlayer.HUD.controls.craftingmenu and ThePlayer.HUD.controls.craftingmenu.craftingmenu and ThePlayer.HUD.controls.craftingmenu.craftingmenu.search_box and ThePlayer.HUD.controls.craftingmenu.craftingmenu.search_box.textbox and ThePlayer.HUD.controls.craftingmenu.craftingmenu.search_box.textbox.editing)
+    local focus = GLOBAL.TheFrontEnd:GetFocusWidget()
+    local is_typing = focus ~= nil and focus.inst ~= nil and focus.inst.TextEditWidget ~= nil
+
+    if is_typing then 
+        return false 
+    end
+
+    return screen:find("HUD") ~= nil 
+        and GLOBAL.ThePlayer ~= nil 
+        and not GLOBAL.ThePlayer.HUD:IsChatInputScreenOpen() 
+        and not GLOBAL.ThePlayer.HUD.writeablescreen
 end
 
-modimport('scripts/qa_default.lua')
-modimport('scripts/qa_utils.lua')
+-- 导入各个配置与词库文件
+modimport('scripts/qa_config/qa_default.lua')
+modimport('scripts/qa_config/qa_cat.lua')
+modimport('scripts/qa_config/qa_tsundere.lua')
+modimport('scripts/qa_config/qa_cute.lua')
+modimport('scripts/qa_config/qa_utils.lua')
 
-local DEFAULT_SCHEME = json.decode(json.encode(GLOBAL.STRINGS.DEFAULT_NOMU_QA))
-local VERSION = 1.2
+-- [2] 全局数据
+local DEFAULT_SCHEME = DeepCopy(GLOBAL.STRINGS.DEFAULT_NOMU_QA)
+local VERSION = 1
+
+-- 检查是否启用了 Show Me
 local SHOW_ME_ON = ModManager:GetMod("workshop-666155465") ~= nil or ModManager:GetMod("workshop-2287303119") ~= nil
-local DISPLAY_INFORMATION_ON = ModManager:GetMod("workshop-3448350904") ~= nil
 
--- 数据 --
 GLOBAL.NOMU_QA = {
     DATA = {
-        DEFAULT_WHISPER = false,
-        CHARACTER_SPECIFIC = true,
+        DEFAULT_WHISPER = false, 
+        CHARACTER_SPECIFIC = true, 
         FREQ_AUTO_CLOSE = true,
-        SHOW_ME = 1,
-        FREQ_LIST = {
-            STRINGS.NOMU_QA.FREQ_EXAMPLE
+        SHOW_ME = 1, 
+        ANNOUNCE_RANGE = 40, 
+        FUZZY_ANNOUNCE = false, 
+        SHOW_PREFIX = true,
+        SHOW_DISTANCE = 0, 
+        SHOW_MOD_NAME = false, 
+        SHOW_ASSET_INFO = 0, 
+        BLOCK_ACTION = true, 
+        ANNOUNCE_ALL_MISSING_INGREDIENTS = true, 
+        DEBUG_MODE = false, 
+        ENABLE_FORBIDDEN = true, 
+        ENABLE_REPLACE = true,
+        FREQ_LIST = { STRINGS.NOMU_QA.FREQ_EXAMPLE },
+        ENABLE_CUSTOM_PREFAB_NAME = true, 
+        ENABLE_SPECIAL_STATE = true,
+        ENABLE_SHOWME_FILTER = true,
+        CUSTOM_PREFAB_NAMES = {},
+        SHOWME_FILTERS = {},
+        FORBIDDEN_WORDS = {},
+        REPLACEMENTS = {},
+        SCHEMES = { 
+            { 
+                name = STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME, 
+                data = DeepCopy(GLOBAL.STRINGS.DEFAULT_NOMU_QA), 
+                version = VERSION 
+            } 
         },
-        SCHEMES = {
-            { name = STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME, data = json.decode(json.encode(GLOBAL.STRINGS.DEFAULT_NOMU_QA)), version = VERSION }
-        },
-        CURRENT_SCHEME = { name = STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME, data = DEFAULT_SCHEME, version = VERSION }
+        CURRENT_SCHEME = { 
+            name = STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME, 
+            data = DeepCopy(GLOBAL.STRINGS.DEFAULT_NOMU_QA), 
+            version = VERSION 
+        }
     },
     SCHEME = DEFAULT_SCHEME
 }
 
--- GLOBAL.NOMU_QA.UpdateScheme = function(scheme)
---     for func, func_value in pairs(GLOBAL.STRINGS.DEFAULT_NOMU_QA) do
---         if not scheme[func] then
---             scheme[func] = json.decode(json.encode(func_value))
---         else
---             for format, format_value in pairs(func_value.FORMATS) do
---                 if not scheme[func].FORMATS[format] then
---                     scheme[func].FORMATS[format] = format_value
---                 end
---             end
---             if func_value.MAPPINGS.DEFAULT then
---                 for mapping, mapping_value in pairs(func_value.MAPPINGS.DEFAULT) do
---                     for _, character_value in scheme[func].MAPPINGS do
---                         if not character_value[mapping] then
---                             character_value[mapping] = json.decode(json.encode(mapping_value))
---                         else
---                             for item, item_value in pairs(mapping_value) do
---                                 if not character_value[mapping][item] then
---                                     character_value[mapping][item] = item_value
---                                 end
---                             end
---                         end
---                     end
---                 end
---                 if not scheme[func].MAPPINGS.DEFAULT then
---                     scheme[func].MAPPINGS.DEFAULT = json.decode(json.encode(func_value.MAPPINGS.DEFAUL))
---                 end
---             end
---         end
---     end
--- end
+-- 更新方案，补全缺失的字段
+GLOBAL.NOMU_QA.UpdateScheme = function(scheme)
+    for func, func_value in pairs(GLOBAL.STRINGS.DEFAULT_NOMU_QA) do
+        if not scheme[func] then
+            scheme[func] = DeepCopy(func_value)
+        else
+            for format, format_value in pairs(func_value.FORMATS) do
+                if not scheme[func].FORMATS[format] then 
+                    scheme[func].FORMATS[format] = format_value 
+                end
+            end
+            
+            if func_value.MAPPINGS.DEFAULT then
+                for mapping, mapping_value in pairs(func_value.MAPPINGS.DEFAULT) do
+                    for _, character_value in pairs(scheme[func].MAPPINGS) do
+                        if not character_value[mapping] then
+                            character_value[mapping] = DeepCopy(mapping_value)
+                        else
+                            for item, item_value in pairs(mapping_value) do
+                                if not character_value[mapping][item] then 
+                                    character_value[mapping][item] = item_value 
+                                end
+                            end
+                        end
+                    end
+                end
+                if not scheme[func].MAPPINGS.DEFAULT then 
+                    scheme[func].MAPPINGS.DEFAULT = DeepCopy(func_value.MAPPINGS.DEFAULT) 
+                end
+            end
+        end
+    end
+end
 
+-- 应用宣告方案
 GLOBAL.NOMU_QA.ApplyScheme = function(scheme)
-    --GLOBAL.NOMU_QA.UpdateScheme(scheme)
+    GLOBAL.NOMU_QA.UpdateScheme(scheme.data)
     GLOBAL.NOMU_QA.SCHEME = scheme.data
 end
 
-local DATA_FILE = 'mod_config_data/nomu_quick_announce'
+-- 本地存储文件路径
+local DATA_FILE = 'mod_config_data/nomu_quick_announce_v3'
 
+-- 通用的数据类型纠正函数
+local function EnsureDataType(template_val, saved_val)
+    local t_type = type(template_val)
+    local s_type = type(saved_val)
+
+    if t_type == s_type then return saved_val end
+
+    if t_type == "number" and s_type == "boolean" then
+        return saved_val and 1 or 0
+    end
+
+    if t_type == "boolean" and s_type == "number" then
+        return saved_val > 0
+    end
+
+    return template_val
+end
+
+-- 加载本地数据
 GLOBAL.NOMU_QA.LoadData = function()
     TheSim:GetPersistentString(DATA_FILE, function(load_success, str)
         if load_success and #str > 0 then
             local run_success, data = RunInSandboxSafe(str)
-            if run_success then
-                for k, v in pairs(data) do
-                    if v ~= nil then
-                        GLOBAL.NOMU_QA.DATA[k] = v
+            if run_success and type(data) == "table" then
+                for k, template_value in pairs(GLOBAL.NOMU_QA.DATA) do
+                    if data[k] ~= nil then
+                        GLOBAL.NOMU_QA.DATA[k] = EnsureDataType(template_value, data[k])
                     end
                 end
             end
         end
+        GLOBAL.NOMU_QA.ApplyScheme(GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME)
     end)
-    GLOBAL.NOMU_QA.ApplyScheme(GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME)
 end
 
+-- 保存本地数据
 GLOBAL.NOMU_QA.SaveData = function()
     SavePersistentString(DATA_FILE, DataDumper(GLOBAL.NOMU_QA.DATA, nil, true), false, nil)
 end
 
-AddSimPostInit(function()
-    GLOBAL.NOMU_QA.LoadData()
 
-    local need_update = false
-    -- 更新预设
-    if (GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.version) <= 1 then
-        if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "CURRENT_SCHEME", "data", "SEASON", "FORMATS") then
-            GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.SEASON.FORMATS.DEFAULT = STRINGS.DEFAULT_NOMU_QA.SEASON.FORMATS.DEFAULT
-        end
-        if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "CURRENT_SCHEME", "data", "WORLD_TEMPERATURE_AND_RAIN", "FORMATS") then
-            GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN = STRINGS.DEFAULT_NOMU_QA.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN
-        end
-    end
+-- [3] 核心辅助工具 
 
-    if (GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.version) <= 1.1 then
-        need_update = true
-        if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "CURRENT_SCHEME", "data", "HEALTH", "MAPPINGS", "WORMWOOD", "MESSAGE") then
-            GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.data.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL = STRINGS.DEFAULT_NOMU_QA.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL
-        end
-    end
-
-    if need_update then
-        print("[快捷宣告(NoMu)] 正在更新自定义宣告内容..")
-        for k,v in pairs (GLOBAL.NOMU_QA.DATA.SCHEMES) do
-            if v.version <= 1 then
-                if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "SCHEMES", k, "data", "SEASON", "FORMATS") then
-                    GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.SEASON.FORMATS.DEFAULT = STRINGS.DEFAULT_NOMU_QA.SEASON.FORMATS.DEFAULT
-                end
-                if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "SCHEMES", k, "data", "WORLD_TEMPERATURE_AND_RAIN", "FORMATS") then
-                    GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN = STRINGS.DEFAULT_NOMU_QA.WORLD_TEMPERATURE_AND_RAIN.FORMATS.NO_RAIN
-                end
-            end
-
-            if v.version <= 1.1 then
-                if table.typecheckedgetfield(GLOBAL.NOMU_QA, "table", "DATA", "SCHEMES", k, "data", "HEALTH", "MAPPINGS", "WORMWOOD", "MESSAGE") then
-                    GLOBAL.NOMU_QA.DATA.SCHEMES[k].data.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL = STRINGS.DEFAULT_NOMU_QA.HEALTH.MAPPINGS.WORMWOOD.MESSAGE.FULL
-                end
-
-                GLOBAL.NOMU_QA.DATA.SCHEMES[k].version = VERSION -- 设定配置文件版本
-            end
-        end
-
-        GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME.version = VERSION
-
-        GLOBAL.NOMU_QA.SaveData()
-        GLOBAL.NOMU_QA.ApplyScheme(GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME)
-    end
-end)
-
--- 宣告消息
-local function Announce(message, no_whisper)
-    message = message:gsub("(%d)\176([CF）])", "%1°%2") -- 修复无法宣告暖石温度的问题 show me用的 ° 是 \176 这个玩意无法被Say出来
-    local whisper = GLOBAL.NOMU_QA.DATA.DEFAULT_WHISPER ~= TheInput:IsKeyDown(KEY_LCTRL)
-    if no_whisper then
-        whisper = false
-    end
-    TheNet:Say(STRINGS.LMB .. ' ' .. message, whisper)
-    return true
+-- 转义正则特殊字符
+local function escape_pattern(text) 
+    return text:gsub("([%(%)%.%%%+%-%*%?%[%^%$])", "%%%1") 
 end
 
+-- 批量检查动画状态
+local function CheckAnims(animState, anim_list)
+    if not animState then return false end
+    for _, anim in ipairs(anim_list) do
+        if animState:IsCurrentAnimation(anim) then return true end
+    end
+    return false
+end
+
+-- 通用字符串前缀清理工具
+local function CleanPrefixName(raw_display, base_name, current_name)
+    local final_name = current_name
+    if GLOBAL.NOMU_QA.DATA.SHOW_PREFIX then
+        local display_no_n = string.gsub(raw_display, '\n', '') 
+        local display_spaced = string.gsub(raw_display, '\n', ' ') 
+        if base_name and base_name ~= "" then
+            if display_no_n ~= base_name and string.find(display_no_n, base_name, 1, true) then 
+                final_name = string.gsub(display_no_n, escape_pattern(base_name), final_name)
+            elseif display_spaced ~= base_name and string.find(display_spaced, base_name, 1, true) then 
+                final_name = string.gsub(display_spaced, escape_pattern(base_name), final_name) 
+            end
+        else
+            if final_name and display_no_n ~= final_name and string.find(display_no_n, final_name, 1, true) then 
+                final_name = display_no_n
+            elseif final_name and display_spaced ~= final_name and string.find(display_spaced, final_name, 1, true) then 
+                final_name = display_spaced 
+            end
+        end
+    end
+    return final_name
+end
+
+--  获取自定义预制物名称 
+local function ApplyCustomName(prefab, original_name)
+    if not GLOBAL.NOMU_QA.DATA.ENABLE_CUSTOM_PREFAB_NAME 
+        or not GLOBAL.NOMU_QA.DATA.CUSTOM_PREFAB_NAMES 
+        or not prefab then 
+        return original_name 
+    end
+    
+    local prefab_str = string.lower(tostring(prefab))
+    for _, v in ipairs(GLOBAL.NOMU_QA.DATA.CUSTOM_PREFAB_NAMES) do
+        if v.prefab and string.lower(v.prefab) == prefab_str and v.name ~= "" then
+            return v.name
+        end
+    end
+    return original_name
+end
+
+-- 核心发送宣告消息的函数
+local function Announce(message, no_whisper, debug_info)
+    -- 文本替换处理
+    if GLOBAL.NOMU_QA.DATA.ENABLE_REPLACE and GLOBAL.NOMU_QA.DATA.REPLACEMENTS then
+        for _, rule in ipairs(GLOBAL.NOMU_QA.DATA.REPLACEMENTS) do
+            if rule.target and rule.target ~= "" then
+                message = message:gsub(escape_pattern(rule.target), rule.result or "")
+            end
+        end
+    end
+    
+    -- 处理温度符号
+    message = message:gsub("(%d)\176([CF）])", "%1°%2")
+    
+    -- 违禁词处理
+    if GLOBAL.NOMU_QA.DATA.ENABLE_FORBIDDEN and GLOBAL.NOMU_QA.DATA.FORBIDDEN_WORDS then
+        for _, word in ipairs(GLOBAL.NOMU_QA.DATA.FORBIDDEN_WORDS) do
+            if word and word ~= "" then 
+                message = message:gsub(escape_pattern(word), "") 
+            end
+        end
+    end
+    
+    -- 去除多余的空格
+    message = message:gsub("%s+", " "):gsub("^%s", ""):gsub("%s$", "")
+    
+    -- 拼接调试信息
+    if GLOBAL.NOMU_QA.DATA.DEBUG_MODE and debug_info then 
+        message = message .. " " .. debug_info 
+    end
+    
+    -- 确定是否为私聊宣告
+    local whisper = GLOBAL.NOMU_QA.DATA.DEFAULT_WHISPER ~= TheInput:IsKeyDown(KEY_LCTRL)
+    if no_whisper then 
+        whisper = false 
+    end
+    
+    if message ~= "" then
+        TheNet:Say(STRINGS.LMB .. ' ' .. message, whisper)
+        return true
+    end
+    return false
+end
+
+-- 获取方案对应的映射文本
 local function GetMapping(qa, category, key)
     local prefab = ThePlayer.prefab:upper()
-    return GLOBAL.NOMU_QA.DATA.CHARACTER_SPECIFIC and qa.MAPPINGS[prefab] and qa.MAPPINGS[prefab][category] and qa.MAPPINGS[prefab][category][key] or qa.MAPPINGS.DEFAULT[category][key]
+    if GLOBAL.NOMU_QA.DATA.CHARACTER_SPECIFIC 
+        and qa.MAPPINGS[prefab] 
+        and qa.MAPPINGS[prefab][category] 
+        and qa.MAPPINGS[prefab][category][key] then
+        
+        return qa.MAPPINGS[prefab][category][key]
+    end
+    return qa.MAPPINGS.DEFAULT[category][key]
 end
 
+-- 发送带有表情符号和百分比的徽章类宣告
 local function AnnounceBadge(qa, current, max, category)
-    local fmts = {
-        CURRENT = math.floor(current + 0.5),
-        MAX = max,
-        MESSAGE = GetMapping(qa, 'MESSAGE', category)
+    local fmts = { 
+        CURRENT = math.floor(current + 0.5), 
+        MAX = max, 
+        MESSAGE = GetMapping(qa, 'MESSAGE', category) 
     }
-    if GetMapping(qa, 'SYMBOL', 'EMOJI') and TheInventory:CheckOwnership('emoji_' .. GetMapping(qa, 'SYMBOL', 'EMOJI')) then
-        fmts.SYMBOL = ':' .. GetMapping(qa, 'SYMBOL', 'EMOJI') .. ':'
+    
+    local emoji_key = GetMapping(qa, 'SYMBOL', 'EMOJI')
+    if emoji_key and TheInventory:CheckOwnership('emoji_' .. emoji_key) then
+        fmts.SYMBOL = ':' .. emoji_key .. ':'
     else
         fmts.SYMBOL = GetMapping(qa, 'SYMBOL', 'TEXT')
     end
+    
     return Announce(subfmt(qa.FORMATS.DEFAULT, fmts))
 end
 
--- 处理“shift + alt + 鼠标左键”
+-- 根据阈值获取百分比对应的层级
+local function get_category(thresholds, percent)
+    local i = 1
+    while thresholds[i] ~= nil and percent >= thresholds[i] do 
+        i = i + 1 
+    end
+    return i
+end
+
+-- 处理 Show Me 信息的公共方法
+local function GetShowMeString(target, qa, start_line, end_line, p3, p4)
+    if not SHOW_ME_ON then 
+        return "" 
+    end
+    
+    if not (GLOBAL.NOMU_QA.DATA.SHOW_ME == 1 or 
+           (GLOBAL.NOMU_QA.DATA.SHOW_ME == 2 and target:HasTag('unwrappable'))) then 
+        return "" 
+    end
+
+    local items = GLOBAL.QA_UTILS.ParseHoverText(start_line, end_line, p3, p4)
+    local filtered = {}
+    
+    for _, str in ipairs(items) do 
+        if str and str:match("%S") then 
+            local is_banned = str:find("代码:") 
+                           or str:find("动画:") 
+                           or str:find("贴图:") 
+                           or str:find(GLOBAL.STRINGS.NOMU_QA.SHOW_MOD_PREFIX or "模组：")
+
+            if not is_banned and GLOBAL.NOMU_QA.DATA.ENABLE_SHOWME_FILTER and GLOBAL.NOMU_QA.DATA.SHOWME_FILTERS then
+                for _, bad_word in ipairs(GLOBAL.NOMU_QA.DATA.SHOWME_FILTERS) do
+                    if bad_word and bad_word ~= "" and str:find(bad_word) then 
+                        is_banned = true 
+                        break 
+                    end
+                end
+            end
+            
+            if not is_banned then 
+                table.insert(filtered, str) 
+            end 
+        end 
+    end
+
+    if target:HasTag("farm_plant") then 
+        local s = {}
+        for i = 1, math.min(#filtered, 2) do 
+            table.insert(s, filtered[i]) 
+        end
+        filtered = s 
+    end
+
+    if #filtered > 0 then 
+        local joined_str = table.concat(filtered, STRINGS.NOMU_QA.COMMA)
+
+        if #joined_str > 270 then
+            joined_str = filtered[#filtered]
+        end
+
+        return subfmt(GetMapping(qa, 'WORDS', 'SHOW_ME'), { SHOW_ME = joined_str })
+    end
+
+    return ""
+end
+
+
+-- [4] 实体状态检测工具 
+-- 常见可采摘植物列表
+local BASIC_PICKABLES = {
+    grass = true, sapling = true, berrybush = true, berrybush2 = true, berrybush_juicy = true, 
+    reeds = true, bullkelp_plant = true, marsh_bush = true, lichen = true, cave_banana_tree = true, 
+    monkeytail = true, bananabush = true, sapling_moon = true, cactus = true, oasis_cactus = true, 
+    rock_avocado_bush = true, wormlight_plant = true, oceanvine = true
+}
+
+-- 需要特殊判定
+local SPECIAL_CROPS = {
+    waterplant = true,
+    saltstack = true,
+    marbleshrub = true,
+    mushroom_farm = true,
+    tallbirdnest = true,
+    lureplant = true
+}
+
+local function GetCropStat(animState)
+    if not animState then return nil end
+    if CheckAnims(animState, {"crop_seed"}) then return "SEED" end
+    if CheckAnims(animState, {"crop_sprout", "crop_small", "crop_med"}) then return "GROW" end
+    if CheckAnims(animState, {"crop_full"}) then return "FULL" end
+    if CheckAnims(animState, {"crop_oversized"}) then return "OVER" end
+    if CheckAnims(animState, {"crop_rot", "crop_rot_oversized"}) then return "ROT" end
+    return nil
+end
+
+local function GetSaltStackStat(animState)
+    if not animState then return nil end
+    if CheckAnims(animState, {"full", "med_to_full"}) then return "SALT_FULL" end
+    if CheckAnims(animState, {"med", "low_to_med"}) then return "SALT_MED" end
+    if CheckAnims(animState, {"low", "empty_to_low"}) then return "SALT_LOW" end
+    if CheckAnims(animState, {"empty"}) then return "SALT_EMPTY" end
+    return nil
+end
+
+local function GetMarbleShrubStat(animState)
+    if not animState then return nil end
+    if CheckAnims(animState, {"idle_tall", "hit_tall", "grow_normal_to_tall"}) then return "MARBLE_TALL" end
+    if CheckAnims(animState, {"idle_normal", "hit_normal", "grow_short_to_normal"}) then return "MARBLE_NORMAL" end
+    if CheckAnims(animState, {"idle_short", "hit_short", "grow_tall_to_short", "grow_seed_to_short"}) then return "MARBLE_SHORT" end
+    return nil
+end
+
+local function GetBeeboxStat(animState)
+    if not animState then return nil end
+    if CheckAnims(animState, {"honey3", "hit_honey3"}) then return "BEEBOX_FULL" end
+    if CheckAnims(animState, {"honey2", "hit_honey2", "honey1", "hit_honey1"}) then return "BEEBOX_SOME" end
+    if CheckAnims(animState, {"bees_loop", "hit_idle", "idle", "place"}) then return "BEEBOX_EMPTY" end
+    return nil
+end
+
+local function GetMushroomFarmStat(animState)
+    if not animState then return nil end
+    if CheckAnims(animState, {"expired"}) then return "MUSHROOMFARM_ROTTEN" end
+    if CheckAnims(animState, {"mushroom_4_idle", "hit_mushroom_4", "mushroom_4"}) then return "MUSHROOMFARM_STAGE4" end
+    if CheckAnims(animState, {"mushroom_3_idle", "hit_mushroom_3", "mushroom_3"}) then return "MUSHROOMFARM_STAGE3" end
+    if CheckAnims(animState, {"mushroom_2_idle", "hit_mushroom_2", "mushroom_2"}) then return "MUSHROOMFARM_STAGE2" end
+    if CheckAnims(animState, {"mushroom_1_idle", "hit_mushroom_1", "mushroom_1"}) then return "MUSHROOMFARM_STAGE1" end
+    if CheckAnims(animState, {"idle", "hit_idle", "place"}) then return "MUSHROOMFARM_EMPTY" end
+    return nil
+end
+
+local function GetLureplantStat(animState)
+    if not animState then return "PICKABLE_EMPTY" end
+    if CheckAnims(animState, {"idle_empty", "idle_hidden", "hibernate", "picked", "emerge", "hidebait", "grow_bait"}) then
+        return "PICKABLE_EMPTY"
+    end
+    return "PICKABLE_READY"
+end
+
+local function GetTreeStat(ent)
+    if not ent then return nil end
+    if ent:HasTag("stump") then return "STUMP" end
+
+    if ent:HasTag("rock_tree") then
+        if ent:HasTag("boulder") then return "BOULDER" end
+        if ent.AnimState and CheckAnims(ent.AnimState, {"idle_normal", "sway1_loop_normal"}) then return "TALL" end
+    end
+
+    if ent.prefab == "marbleshrub" then return GetMarbleShrubStat(ent.AnimState) end
+    if ent.prefab and string.find(ent.prefab, "marbletree") then return "MARBLE_TREE" end
+
+    if ent.prefab and string.find(ent.prefab, "ancienttree") then
+        if string.find(ent.prefab, "sapling") then
+            if ent:HasTag("seedstage") or (ent.AnimState and ent.AnimState:IsCurrentAnimation("idle_planted")) then return "SEED" end
+            if ent.AnimState and ent.AnimState:IsCurrentAnimation("sprout_idle") then return "SAPLING" end
+        end
+        if ent:HasTag("ancienttree") then
+            if ent:HasTag("pickable") then return "ANCIENT_READY" else return "ANCIENT_EMPTY" end
+        end
+    end
+
+    if ent.prefab == "marblebean_sapling" then return "SEED" end
+    if ent.prefab and string.find(ent.prefab, "sapling") and not string.find(ent.prefab, "dug_") then return "SAPLING" end
+
+    if ent:HasTag("mushtree") then
+        local sx = ent.Transform:GetScale()
+        if sx < 0.95 then return "SHORT" end
+        if sx > 1.05 then return "TALL" end
+        return "NORMAL"
+    end
+
+    local anim = ent.AnimState
+    if not anim then return nil end
+    if anim:IsCurrentAnimation("idle_sapling") then return "SAPLING" end
+    if CheckAnims(anim, {"idle_short", "sway1_loop_short", "sway2_loop_short", "sway_loop_short"}) then return "SHORT" end
+    if CheckAnims(anim, {"idle_normal", "sway1_loop_normal", "sway2_loop_normal", "sway_loop_normal"}) then return "NORMAL" end
+    if CheckAnims(anim, {"idle_tall", "sway1_loop_tall", "sway2_loop_tall", "idle_old", "sway1_loop_old", "sway2_loop_old"}) then return "TALL" end
+
+    return nil
+end
+
+local function GetSpiderDenStat(ent)
+    if not ent then return nil end
+
+    if ent:HasTag("shadowchesspiece") then
+        if not ent:HasTag("epic") then return "L1"
+        elseif ent:HasTag("smallepic") then return "L2"
+        else return "L3" end
+    end
+
+    -- 蜘蛛巢等级判定
+    if not ent:HasTag("spiderden") then return nil end
+    local level = 1
+
+    if ent:HasTag("tent") then
+        level = 3
+    else
+        if ent.prefab == "spiderden_2" then level = 2
+        elseif ent.prefab == "spiderden_3" then level = 3 end
+        
+        if ent.AnimState then
+            if CheckAnims(ent.AnimState, {"cocoon_medium", "cocoon_medium_hit", "frozen_medium", "frozen_loop_pst_medium", "cocoon_medium_bedazzled", "grow_small_to_medium"}) then
+                level = 2
+            elseif CheckAnims(ent.AnimState, {"cocoon_large", "cocoon_large_hit", "frozen_large", "frozen_loop_pst_large", "cocoon_large_bedazzled", "grow_medium_to_large", "cocoon_sleep_loop"}) then
+                level = 3
+            end
+        end
+    end
+    
+    local bedazzled = ent:HasTag("bedazzled")
+    return "L" .. tostring(level) .. (bedazzled and "_BEDAZZLED" or "")
+end
+
+local function GetHotspringStat(ent)
+    if not ent or ent.prefab ~= "hotspring" then return nil end
+    if ent:HasTag("moonglass") then return "GLASSED" end
+    if ent.AnimState then
+        if CheckAnims(ent.AnimState, {"glow_loop", "glow_pre", "bath_bomb"}) then return "BOMBED" end
+        if ent.AnimState:IsCurrentAnimation("empty") then return "EMPTY" end
+    end
+    return nil
+end
+
+
+-- [5] 核心宣告逻辑与事件处理
 local function OnHUDMouseButton(HUD)
     local status = HUD.controls.status
+    local widget = TheInput:GetHUDEntityUnderMouse()
     local default_thresholds = { .15, .35, .55, .75 }
     local levels = { 'EMPTY', 'LOW', 'MID', 'HIGH', 'FULL' }
-    local function get_category(thresholds, percent)
-        local i = 1
-        while thresholds[i] ~= nil and percent >= thresholds[i] do
-            i = i + 1
+    
+    -- 勋章 Buff 宣告
+    if widget and widget.widget then
+        local w = widget.widget
+        local parent = w
+        local buff_card = nil
+        local is_medal_buff = false
+
+        while parent do
+            if parent.buff_time and parent.buff_name then 
+                buff_card = parent 
+            end
+            if parent.name == "medalBuffPanel" 
+                or parent.name == "medal_buff_panel" 
+                or (HUD.owner and HUD.owner.medalBuffPanel == parent) then
+                is_medal_buff = true
+                break
+            end
+            parent = parent.parent
         end
-        return i
+        
+        if is_medal_buff and buff_card then
+            local buff_name = buff_card.buff_name:GetString() or "未知BUFF"
+            local left_time = buff_card.buff_time:GetString() or ""
+            local qa = GLOBAL.NOMU_QA.SCHEME.MEDAL_BUFF
+            if qa then
+                if left_time == "" or left_time == "--:--" then
+                    return Announce(subfmt(qa.FORMATS.FOREVER, { BUFF_NAME = buff_name }))
+                else
+                    return Announce(subfmt(qa.FORMATS.DEFAULT, { BUFF_NAME = buff_name, TIME = left_time }))
+                end
+            end
+        end
     end
 
-    -- 饱食度
-    if status.stomach and status.stomach.focus then
-        local qa = GLOBAL.NOMU_QA.SCHEME.STOMACH
-        local current = ThePlayer.player_classified.currenthunger:value()
-        local max = ThePlayer.player_classified.maxhunger:value()
-        local category = levels[get_category(default_thresholds, current / max)]
-        return AnnounceBadge(qa, current, max, category)
-    end
-
-    -- 精神值
-    if status.brain and status.brain.focus then
-        local qa = GLOBAL.NOMU_QA.SCHEME.SANITY
-        local current = ThePlayer.player_classified.currentsanity:value()
-        local max = ThePlayer.player_classified.maxsanity:value()
-        local category = levels[get_category(default_thresholds, current / max)]
-        return AnnounceBadge(qa, current, max, category)
-    end
-
-    -- 生命值
-    if status.heart and status.heart.focus then
-        local qa = GLOBAL.NOMU_QA.SCHEME.HEALTH
-        local current = ThePlayer.player_classified.currenthealth:value()
-        local max = ThePlayer.player_classified.maxhealth:value()
-        local category = levels[get_category({ .25, .5, .75, 1 }, current / max)]
-        return AnnounceBadge(qa, current, max, category)
-    end
-
-    -- 潮湿度
-    if status.moisturemeter and status.moisturemeter.focus then
-        local qa = GLOBAL.NOMU_QA.SCHEME.WETNESS
-        local current = ThePlayer.player_classified.moisture:value()
-        local max = ThePlayer.player_classified.maxmoisture:value()
-        local category = levels[get_category(default_thresholds, current / max)]
-        return AnnounceBadge(qa, current, max, category)
-    end
-
-    -- 木头值
-    if status.wereness and status.wereness.focus then
-        local qa = GLOBAL.NOMU_QA.SCHEME.LOG_METER
-        local max = 100
-        local current = ThePlayer.player_classified.currentwereness:value()
-        local category = levels[get_category({ .25, .5, .7, .9 }, current / max)]
-        return AnnounceBadge(qa, current, max, category)
-    end
-
-    -- 人物温度
-    if status.temperature and status.temperature.focus then
-        local qa = GLOBAL.NOMU_QA.SCHEME.TEMPERATURE
-        local temp = ThePlayer:GetTemperature()
-        local fmts = {
-            TEMPERATURE = string.format('%d', temp),
-            MESSAGE = GetMapping(qa, 'MESSAGE', 'GOOD')
+    -- 绽放值宣告
+    if status.bloombadge and status.bloombadge.focus and ThePlayer and ThePlayer.components._bloomness then
+        local current = status.bloombadge.val or 0
+        local max = status.bloombadge.max or 100
+        local level = ThePlayer.components._bloomness:GetLevel()
+        local stage = level
+        
+        if (stage == 1 or stage == 2) and not ThePlayer.components._bloomness.is_blooming then 
+            stage = stage + 3 
+        end
+        
+        local qa = GLOBAL.NOMU_QA.SCHEME.BLOOMNESS
+        local fmts = { 
+            CURRENT = math.floor(current + 0.5), 
+            MAX = max, 
+            LEVEL = tostring(level),
+            MESSAGE = GetMapping(qa, 'MESSAGE', "STAGE_" .. tostring(stage)) 
         }
-        if temp >= TUNING.OVERHEAT_TEMP then
-            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'BURNING')
-        elseif temp >= TUNING.OVERHEAT_TEMP - 5 then
-            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'HOT')
-        elseif temp >= TUNING.OVERHEAT_TEMP - 15 then
-            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'WARM')
-        elseif temp <= 0 then
-            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'FREEZING')
-        elseif temp <= 5 then
-            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'COLD')
-        elseif temp <= 15 then
-            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'COOL')
+        
+        local emoji_key = GetMapping(qa, 'SYMBOL', 'EMOJI')
+        if emoji_key and TheInventory:CheckOwnership('emoji_' .. emoji_key) then
+            fmts.SYMBOL = ':' .. emoji_key .. ':'
+        else
+            fmts.SYMBOL = GetMapping(qa, 'SYMBOL', 'TEXT')
         end
+        
         return Announce(subfmt(qa.FORMATS.DEFAULT, fmts))
     end
 
-    -- 世界温度和降雨
-    if status.worldtemp and status.worldtemp.focus then
-        local SEASON = GLOBAL.STRINGS.UI.SERVERLISTINGSCREEN.SEASONS[TheWorld.state.season:upper()]
-        if SEASON == '春' or SEASON == '夏' or SEASON == '秋' or SEASON == '冬' then
-            SEASON = SEASON .. '季'
-        end
-
-        local qa = GLOBAL.NOMU_QA.SCHEME.WORLD_TEMPERATURE_AND_RAIN
-        local fmts = {
-            TEMPERATURE = math.floor(TheWorld.state.temperature + 0.5),
-            SEASON = SEASON,
-            WEATHER = GetMapping(qa, 'WEATHER', TheWorld.state.season:upper())
-        }
-        local qa_fmt = qa.FORMATS.NO_RAIN
-        if TheWorld.state.pop ~= 1 then
-            local world, total_seconds, rain = GLOBAL.QA_UTILS.PredictRainStart()
-            fmts.WORLD = GetMapping(qa, 'WORLD', world)
-            if rain then
-                fmts.DAYS, fmts.MINUTES, fmts.SECONDS = GLOBAL.QA_UTILS.FormatSeconds(total_seconds)
-                qa_fmt = qa.FORMATS.START_RAIN
+    -- 淘气值宣告
+    if (status.naughtiness and status.naughtiness.focus) or (status.naughtybadge and status.naughtybadge.focus) then
+        local current, max = 0, 50
+        if status.naughtiness and status.naughtiness.num then
+            local cur_str, max_str = string.match(status.naughtiness.num:GetString() or "", "(%d+)%s*/%s*(%d+)")
+            if cur_str and max_str then 
+                current, max = tonumber(cur_str), tonumber(max_str) 
             end
-        else
-            local world, total_seconds = GLOBAL.QA_UTILS.PredictRainStop()
-            fmts.WORLD = GetMapping(qa, 'WORLD', world)
-            fmts.DAYS, fmts.MINUTES, fmts.SECONDS = GLOBAL.QA_UTILS.FormatSeconds(total_seconds)
-            qa_fmt = qa.FORMATS.STOP_RAIN
         end
-        return Announce(subfmt(qa_fmt, fmts))
+        if max > 0 then 
+            return AnnounceBadge(
+                GLOBAL.NOMU_QA.SCHEME.NAUGHTINESS, 
+                current, 
+                max, 
+                levels[get_category(default_thresholds, current / max)]
+            ) 
+        end
     end
 
-    -- 季节
-    if HUD.controls.seasonclock and HUD.controls.seasonclock.focus or status.season and status.season.focus then
-        local SEASON = GLOBAL.STRINGS.UI.SERVERLISTINGSCREEN.SEASONS[TheWorld.state.season:upper()]
-        if SEASON == '春' or SEASON == '夏' or SEASON == '秋' or SEASON == '冬' then
-            SEASON = SEASON .. '季'
-        end
-
-        local DAYS_LEFT = TheWorld.state.remainingdaysinseason
-        if DAYS_LEFT == 10000 then DAYS_LEFT = "∞" end
-
-        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SEASON.FORMATS.DEFAULT, {
-            SEASON = SEASON,
-            DAYS_LEFT = DAYS_LEFT,
+    -- 幸运值宣告
+    if (status.luck and status.luck.focus) or (status.luckbadge and status.luckbadge.focus) then
+        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.NAUGHTINESS.FORMATS.LUCK, { 
+            CURRENT = status.luck.num and status.luck.num:GetString() or "0.00" 
         }))
     end
+    
+    -- Beefalo HUD 宣告 
+    if HUD.controls and HUD.controls.BeefaloStatusBar and HUD.controls.BeefaloStatusBar:IsVisible() and not HUD.controls.BeefaloStatusBar.isHidden then
+        local b_hud = HUD.controls.BeefaloStatusBar
+        local w = widget and widget.widget
+        local target_badge = nil
 
-    -- 月相
-    if HUD.controls.clock and HUD.controls.clock._moonanim and HUD.controls.clock._moonanim.focus and HUD.controls.clock._moonanim.moontext then
-        local qa = GLOBAL.NOMU_QA.SCHEME.MOON_PHASE
-        if string.find(tostring(HUD.controls.clock._moonanim.moontext), '?') ~= nil then
-            ThePlayer.components.talker:Say(qa.FORMATS.FAILED)
-            return
+        while w do
+            if w == b_hud.healthBadge or w == b_hud.domesticationBadge or w == b_hud.obedienceBadge or w == b_hud.timerBadge or w == b_hud.hungerBadge then
+                target_badge = w
+                break
+            end
+            w = w.parent
         end
-        local moonment = string.match(tostring(HUD.controls.clock._moonanim.moontext), '(%d+)') or 0
-        if moonment == 0 then
-            return
+
+        if target_badge then
+            local qa = GLOBAL.NOMU_QA.SCHEME.BEEFALO
+            if not qa then return false end 
+
+            local BEEFALO_CONFIG = {
+                { 
+                    badge = b_hud.healthBadge, 
+                    fmt = qa.FORMATS.HEALTH, 
+                    fn = function(tb)
+                        local pct = tb.percent or 0
+                        local state = pct < 0.25 and 'HEALTH_LOW' or (pct > 0.8 and 'HEALTH_HIGH' or 'HEALTH_NORMAL')
+                        return { MESSAGE = subfmt(GetMapping(qa, 'MESSAGE', state), { PCT = math.floor(pct * 100 + 0.5) }) }
+                    end 
+                },
+                { 
+                    badge = b_hud.hungerBadge, 
+                    condition = b_hud.isHungerVisible,
+                    fmt = qa.FORMATS.HUNGER, 
+                    fn = function(tb)
+                        local val = tonumber(tb.num and tb.num:GetString() or "0") or 0
+                        local state = val < 50 and 'HUNGER_STARVING' or (val < 150 and 'HUNGER_HUNGRY' or (val > 300 and 'HUNGER_FULL' or 'HUNGER_NORMAL'))
+                        return { MESSAGE = subfmt(GetMapping(qa, 'MESSAGE', state), { VAL = val }) }
+                    end 
+                },
+                {
+                    badge = b_hud.obedienceBadge,
+                    fmt = qa.FORMATS.OBEDIENCE,
+                    fn = function(tb)
+                        local pct = (tb.percent or 0) * 100
+                        local state = pct < 40 and 'OBEDIENCE_LOW' or (pct > 80 and 'OBEDIENCE_HIGH' or 'OBEDIENCE_NORMAL')
+                        return { MESSAGE = subfmt(GetMapping(qa, 'MESSAGE', state), { PCT = math.floor(pct + 0.5) }) }
+                    end
+                },
+                {
+                    badge = b_hud.domesticationBadge,
+                    fmt = qa.FORMATS.DOMESTICATION,
+                    fn = function(tb)
+                        local pct = (tb.percent or 0) * 100
+                        local state = pct >= 100 and 'DOMESTICATION_FULL' or (pct > 90 and 'DOMESTICATION_HIGH' or (pct < 10 and 'DOMESTICATION_LOW' or 'DOMESTICATION_NORMAL'))
+                        local tendency_str = ""
+                        if b_hud.tendency then
+                            local t_name = GetMapping(qa, 'TENDENCY_NAME', b_hud.tendency) or b_hud.tendency
+                            tendency_str = " (趋势: " .. t_name .. ")"
+                        end
+                        return { 
+                            MESSAGE = subfmt(GetMapping(qa, 'MESSAGE', state), { PCT = string.format("%.1f", pct) }),
+                            TENDENCY = tendency_str
+                        }
+                    end
+                },
+                {
+                    badge = b_hud.timerBadge,
+                    fmt = qa.FORMATS.TIMER,
+                    fn = function(tb)
+                        local timeStr = tb.num and tb.num:GetString() or "0:00"
+                        local timeLeft = 999
+                        if b_hud.bucktime and b_hud.bucktime_start then
+                            timeLeft = math.floor(b_hud.bucktime_start + b_hud.bucktime - GLOBAL.GetTime())
+                        end
+                        local state = timeLeft < 30 and 'TIMER_LOW' or 'TIMER_RIDING'
+                        return { MESSAGE = subfmt(GetMapping(qa, 'MESSAGE', state), { TIME = timeStr }) }
+                    end
+                }
+            }
+
+            for _, cfg in ipairs(BEEFALO_CONFIG) do
+                if target_badge == cfg.badge and (cfg.condition == nil or cfg.condition == true) then
+                    return Announce(subfmt(cfg.fmt, cfg.fn(target_badge)))
+                end
+            end
         end
-        local worldment = TheWorld.state.cycles + 1 or 0
-        if worldment == 0 then
-            return
-        end
-        local fmts = {
-            INTERVAL = GetMapping(qa, 'INTERVAL', 'COMMA')
+    end
+
+    -- 通用属性徽章配置
+    local BADGE_CONFIG = {
+        { 
+            btn = status.pethungerbadge, 
+            comp = ThePlayer.pet_hunger_classified, 
+            qa = "WOBY_HUNGER", 
+            cur_fn = function(c) return c:GetPercent() * (c:Max() or 50) end, 
+            max_fn = function(c) return c:Max() or 50 end 
+        },
+        { 
+            btn = status.waterstomach, 
+            comp = ThePlayer.replica.thirst, 
+            qa = "THIRST", 
+            cur_fn = function(c) return c:GetPercent() * (c:Max() or 100) end, 
+            max_fn = function(c) return c:Max() or 100 end 
+        },
+        { 
+            btn = status.stomach, 
+            comp = ThePlayer.player_classified, 
+            qa = "STOMACH", 
+            cur_fn = function(c) return c.currenthunger:value() end, 
+            max_fn = function(c) return c.maxhunger:value() end 
+        },
+        { 
+            btn = status.brain, 
+            comp = ThePlayer.player_classified, 
+            qa = "SANITY", 
+            cur_fn = function(c) return c.currentsanity:value() end, 
+            max_fn = function(c) return c.maxsanity:value() end 
+        },
+        { 
+            btn = status.heart, 
+            comp = ThePlayer.player_classified, 
+            qa = "HEALTH", 
+            thresholds = { .25, .5, .75, 1 }, 
+            cur_fn = function(c) return c.currenthealth:value() end, 
+            max_fn = function(c) return c.maxhealth:value() end 
+        },
+        { 
+            btn = status.moisturemeter, 
+            comp = ThePlayer.player_classified, 
+            qa = "WETNESS", 
+            cur_fn = function(c) return c.moisture:value() end, 
+            max_fn = function(c) return c.maxmoisture:value() end 
+        },
+        { 
+            btn = status.wereness, 
+            comp = ThePlayer.player_classified, 
+            qa = "LOG_METER", 
+            thresholds = { .25, .5, .7, .9 }, 
+            cur_fn = function(c) return c.currentwereness:value() end, 
+            max_fn = function(c) return 100 end 
         }
+    }
+
+    -- 遍历通用徽章进行宣告
+    for _, cfg in ipairs(BADGE_CONFIG) do
+        if cfg.btn and cfg.btn.focus and cfg.comp then
+            local current, max = cfg.cur_fn(cfg.comp), cfg.max_fn(cfg.comp)
+            return AnnounceBadge(
+                GLOBAL.NOMU_QA.SCHEME[cfg.qa], 
+                current, 
+                max, 
+                levels[get_category(cfg.thresholds or default_thresholds, current / max)]
+            )
+        end
+    end
+
+    -- 温度宣告
+    if status.temperature and status.temperature.focus then
+        local qa = GLOBAL.NOMU_QA.SCHEME.TEMPERATURE
+        local temp = ThePlayer:GetTemperature()
+        local fmts = { 
+            TEMPERATURE = string.format('%d', temp), 
+            MESSAGE = GetMapping(qa, 'MESSAGE', 'GOOD') 
+        }
+        
+        if temp >= TUNING.OVERHEAT_TEMP then 
+            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'BURNING')
+        elseif temp >= TUNING.OVERHEAT_TEMP - 5 then 
+            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'HOT')
+        elseif temp >= TUNING.OVERHEAT_TEMP - 15 then 
+            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'WARM')
+        elseif temp <= 0 then 
+            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'FREEZING')
+        elseif temp <= 5 then 
+            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'COLD')
+        elseif temp <= 15 then 
+            fmts.MESSAGE = GetMapping(qa, 'MESSAGE', 'COOL') 
+        end
+        
+        return Announce(subfmt(qa.FORMATS.DEFAULT, fmts))
+    end
+
+    -- 预判断焦点是否在温度计或季节表盘上
+    local is_worldtemp_focus = status.worldtemp and status.worldtemp.focus
+    local is_season_focus = (HUD.controls.seasonclock and HUD.controls.seasonclock.focus) or (status.season and status.season.focus)
+
+    if is_worldtemp_focus or is_season_focus then
+
+        local raw_season = TheWorld.state.season:upper()
+        local SEASON = GLOBAL.STRINGS.UI.SERVERLISTINGSCREEN.SEASONS[raw_season]
+
+        if SEASON == '春' or SEASON == '夏' or SEASON == '秋' or SEASON == '冬' then 
+            SEASON = SEASON .. '季' 
+        end
+        
+        -- 世界温度 & 降雨宣告
+        if is_worldtemp_focus then
+            local qa = GLOBAL.NOMU_QA.SCHEME.WORLD_TEMPERATURE_AND_RAIN
+            local fmts = { 
+                TEMPERATURE = math.floor(TheWorld.state.temperature + 0.5), 
+                SEASON = SEASON, 
+                WEATHER = GetMapping(qa, 'WEATHER', raw_season) 
+            }
+            local qa_fmt = qa.FORMATS.NO_RAIN
+            
+            if TheWorld.state.pop ~= 1 then
+                local world, total_seconds, rain = GLOBAL.QA_UTILS.PredictRainStart()
+                fmts.WORLD = GetMapping(qa, 'WORLD', world)
+                if rain then 
+                    fmts.DAYS, fmts.MINUTES, fmts.SECONDS = GLOBAL.QA_UTILS.FormatSeconds(total_seconds)
+                    qa_fmt = qa.FORMATS.START_RAIN 
+                end
+            else
+                local world, total_seconds = GLOBAL.QA_UTILS.PredictRainStop()
+                fmts.WORLD = GetMapping(qa, 'WORLD', world)
+                fmts.DAYS, fmts.MINUTES, fmts.SECONDS = GLOBAL.QA_UTILS.FormatSeconds(total_seconds)
+                qa_fmt = qa.FORMATS.STOP_RAIN
+            end
+            
+            return Announce(subfmt(qa_fmt, fmts))
+        end
+
+        -- 季节宣告
+        if is_season_focus then
+            local DAYS_LEFT = TheWorld.state.remainingdaysinseason
+            if DAYS_LEFT == 10000 then DAYS_LEFT = "∞" end
+            
+            return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SEASON.FORMATS.DEFAULT, { 
+                SEASON = SEASON, 
+                DAYS_LEFT = DAYS_LEFT 
+            }))
+        end
+    end
+
+    -- 月相宣告
+    if HUD.controls.clock 
+        and HUD.controls.clock._moonanim 
+        and HUD.controls.clock._moonanim.focus 
+        and HUD.controls.clock._moonanim.moontext then
+        
+        local qa = GLOBAL.NOMU_QA.SCHEME.MOON_PHASE
+        local text_val = tostring(HUD.controls.clock._moonanim.moontext)
+        
+        if string.find(text_val, '?') ~= nil then 
+            return ThePlayer.components.talker:Say(qa.FORMATS.FAILED) 
+        end
+        
+        local moonment = string.match(text_val, '(%d+)') or 0
+        local worldment = TheWorld.state.cycles + 1 or 0
+        if moonment == 0 or worldment == 0 then return end
+        
+        local fmts = { INTERVAL = GetMapping(qa, 'INTERVAL', 'COMMA') }
         local moonleft = moonment - worldment
 
-        if moonleft >= 10 then
+        if moonleft >= 10 then 
             fmts.PHASE1 = GetMapping(qa, 'MOON', 'FULL')
             fmts.PHASE2 = GetMapping(qa, 'MOON', 'NEW')
-        else
+        else 
             fmts.PHASE1 = GetMapping(qa, 'MOON', 'NEW')
-            fmts.PHASE2 = GetMapping(qa, 'MOON', 'FULL')
+            fmts.PHASE2 = GetMapping(qa, 'MOON', 'FULL') 
         end
 
         local judge = moonleft % 10
         if judge <= 1 then
-            if judge == 0 then
-                fmts.RECENT = GetMapping(qa, 'RECENT', 'TODAY')
-            else
-                fmts.RECENT = GetMapping(qa, 'RECENT', 'TOMORROW')
-            end
-            judge = judge + 10
-            fmts.PHASE1, fmts.PHASE2 = fmts.PHASE2, fmts.PHASE1
-            if worldment < 20 then
-                return Announce(subfmt(qa.FORMATS.MOON, fmts))
+            fmts.RECENT = judge == 0 and GetMapping(qa, 'RECENT', 'TODAY') or GetMapping(qa, 'RECENT', 'TOMORROW')
+            judge, fmts.PHASE1, fmts.PHASE2 = judge + 10, fmts.PHASE2, fmts.PHASE1
+            if worldment < 20 then 
+                return Announce(subfmt(qa.FORMATS.MOON, fmts)) 
             end
         elseif judge >= 8 then
             fmts.RECENT = GetMapping(qa, 'RECENT', 'AFTER')
         else
-            fmts.RECENT = ''
-            fmts.PHASE1 = ''
-            fmts.INTERVAL = GetMapping(qa, 'INTERVAL', 'NONE')
+            fmts.RECENT, fmts.PHASE1, fmts.INTERVAL = '', '', GetMapping(qa, 'INTERVAL', 'NONE')
         end
+        
         fmts.LEFT = judge
         return Announce(subfmt(qa.FORMATS.DEFAULT, fmts))
     end
 
-    -- 时钟
+    -- 时钟宣告
     if HUD.controls.clock and HUD.controls.clock.focus then
         local clock = TheWorld.net.components.clock
         if clock and clock._remainingtimeinphase and clock._phase and clock.CalcRemainTimeOfDay then
             local qa = GLOBAL.NOMU_QA.SCHEME.CLOCK
             local phases = { 'DAY', 'DUSK', 'NIGHT' }
-            local function _format_time(seconds)
-                local minutes = math.modf(seconds / 60)
-                seconds = math.modf(math.fmod(seconds, 60))
-                local message = ''
-                if minutes > 0 then
-                    message = message .. tostring(minutes) .. GetMapping(qa, 'TIME', 'MINUTES')
-                end
-                message = message .. tostring(seconds) .. GetMapping(qa, 'TIME', 'SECONDS')
-                return message
+            
+            local function _fmt_time(secs)
+                local m, s = math.modf(secs / 60), math.modf(math.fmod(secs, 60))
+                return (m > 0 and (m .. GetMapping(qa, 'TIME', 'MINUTES')) or '') 
+                    .. s .. GetMapping(qa, 'TIME', 'SECONDS')
             end
-
+            
             local fmt = qa.FORMATS.DEFAULT
-            local fmts = {
-                PHASE = GetMapping(qa, 'PHASE', phases[clock._phase:value()]),
-                PHASE_REMAIN = _format_time(clock._remainingtimeinphase:value()),
-                DAY_REMAIN = _format_time(clock.CalcRemainTimeOfDay())
+            local fmts = { 
+                PHASE = GetMapping(qa, 'PHASE', phases[clock._phase:value()]), 
+                PHASE_REMAIN = _fmt_time(clock._remainingtimeinphase:value()), 
+                DAY_REMAIN = _fmt_time(clock.CalcRemainTimeOfDay()) 
             }
-
+            
             if TheWorld.GetNightmareData then
                 local data = TheWorld:GetNightmareData()
-                fmt = data.remain == 0 and data.total ~= 0 and qa.FORMATS.NIGHTMARE_LOCK or qa.FORMATS.NIGHTMARE
+                fmt = (data.remain == 0 and data.total ~= 0) and qa.FORMATS.NIGHTMARE_LOCK or qa.FORMATS.NIGHTMARE
                 fmts.NIGHTMARE = GetMapping(qa, 'NIGHTMARE', data.phase:upper())
-                fmts.REMAIN = _format_time(data.remain)
-                fmts.TOTAL = _format_time(data.total)
+                fmts.REMAIN = _fmt_time(data.remain)
+                fmts.TOTAL = _fmt_time(data.total)
             end
-
+            
             return Announce(subfmt(fmt, fmts))
         end
     end
 
-    -- 船生命值
+    -- 船耐久宣告
     if status.boatmeter and status.boatmeter.focus then
         local qa = GLOBAL.NOMU_QA.SCHEME.BOAT
         local health = { 'EMPTY', 'LOW', 'MID', 'HIGH', 'FULL' }
         local max = status.boatmeter.boat.components.healthsyncer.max_health
-        local step = max / 5 + 1
         local current = status.boatmeter.boat.components.healthsyncer:GetPercent() * max
-        local idx = math.floor(current / step) + 1
-        return Announce(subfmt(qa.FORMATS.DEFAULT, {
-            CURRENT = math.floor(current + 0.5),
-            MAX = max,
-            MESSAGE = GetMapping(qa, 'MESSAGE', health[idx])
+        local idx = math.floor(current / (max / 5 + 1)) + 1
+        
+        return Announce(subfmt(qa.FORMATS.DEFAULT, { 
+            CURRENT = math.floor(current + 0.5), 
+            MAX = max, 
+            MESSAGE = GetMapping(qa, 'MESSAGE', health[idx]) 
         }))
     end
 
-    -- 温蒂：阿比盖尔
-    if status.pethealthbadge and status.pethealthbadge.focus then
-        local badge = status.pethealthbadge
-        if not badge.nomu_max or not badge.nomu_percent then
-            return
-        end
-        local qa = GLOBAL.NOMU_QA.SCHEME.ABIGAIL
-        local max = badge.nomu_max
-        local current = badge.nomu_percent * max
-        local step = max / 5 + 1
-        local idx = math.floor(current / step) + 1
-
-        return AnnounceBadge(qa, current, max, levels[idx])
+    -- 阿比盖尔宣告
+    if status.pethealthbadge and status.pethealthbadge.focus and status.pethealthbadge.nomu_max then
+        local max = status.pethealthbadge.nomu_max
+        local current = status.pethealthbadge.nomu_percent * max
+        return AnnounceBadge(GLOBAL.NOMU_QA.SCHEME.ABIGAIL, current, max, levels[math.floor(current / (max / 5 + 1)) + 1])
     end
 
-    -- 沃尔夫冈：力量值
-    if status.mightybadge and status.mightybadge.focus then
-        local badge = status.mightybadge
-        if not badge.nomu_percent then
-            return
-        end
-        local qa = GLOBAL.NOMU_QA.SCHEME.MIGHTINESS
-        badge.nomu_max = badge.nomu_max or 100
-        local mightiness_levels = { 'WIMPY', 'NORMAL', 'MIGHTY' }
-        local max = badge.nomu_max
-        local current = badge.nomu_percent * max
-        local idx = 1
-        if current >= TUNING.MIGHTY_THRESHOLD then
-            idx = 3
-        elseif current >= TUNING.WIMPY_THRESHOLD then
-            idx = 2
-        end
-
-        return AnnounceBadge(qa, current, max, mightiness_levels[idx])
+    -- 力量值宣告
+    if status.mightybadge and status.mightybadge.focus and status.mightybadge.nomu_percent then
+        local max = status.mightybadge.nomu_max or 100
+        local current = status.mightybadge.nomu_percent * max
+        local idx = current >= TUNING.MIGHTY_THRESHOLD and 3 or (current >= TUNING.WIMPY_THRESHOLD and 2 or 1)
+        local mighty_states = { 'WIMPY', 'NORMAL', 'MIGHTY' }
+        return AnnounceBadge(GLOBAL.NOMU_QA.SCHEME.MIGHTINESS, current, max, mighty_states[idx])
     end
 
-    -- 薇格弗德：灵感值
-    if status.inspirationbadge and status.inspirationbadge.focus then
-        local badge = status.inspirationbadge
-        if not badge.nomu_percent then
-            return
-        end
-        local qa = GLOBAL.NOMU_QA.SCHEME.INSPIRATION
-        badge.nomu_max = badge.nomu_max or 100
-        local max = badge.nomu_max
-        local current = badge.nomu_percent * max
-        local idx = 1
-        if badge.nomu_percent >= TUNING.BATTLESONG_THRESHOLDS[3] then
-            idx = 4
-        elseif badge.nomu_percent >= TUNING.BATTLESONG_THRESHOLDS[2] then
-            idx = 3
-        elseif badge.nomu_percent >= TUNING.BATTLESONG_THRESHOLDS[1] then
-            idx = 2
-        end
-
-        return AnnounceBadge(qa, current, max, levels[idx])
+    -- 灵感值宣告
+    if status.inspirationbadge and status.inspirationbadge.focus and status.inspirationbadge.nomu_percent then
+        local max = status.inspirationbadge.nomu_max or 100
+        local pct = status.inspirationbadge.nomu_percent
+        local idx = pct >= TUNING.BATTLESONG_THRESHOLDS[3] and 4 
+                 or (pct >= TUNING.BATTLESONG_THRESHOLDS[2] and 3 
+                 or (pct >= TUNING.BATTLESONG_THRESHOLDS[1] and 2 or 1))
+        return AnnounceBadge(GLOBAL.NOMU_QA.SCHEME.INSPIRATION, pct * max, max, levels[idx])
     end
 
-    -- WX78: 能量值
-    if HUD.controls.secondary_status and HUD.controls.secondary_status.upgrademodulesdisplay and HUD.controls.secondary_status.upgrademodulesdisplay.focus then
+    -- 电路宣告 (WX-78)
+    if HUD.controls.secondary_status 
+        and HUD.controls.secondary_status.upgrademodulesdisplay 
+        and HUD.controls.secondary_status.upgrademodulesdisplay.focus then
+        
         local qa = GLOBAL.NOMU_QA.SCHEME.ENERGY
-        local widget = HUD.controls.secondary_status.upgrademodulesdisplay
-        local current = widget.energy_level
+        local module_display = HUD.controls.secondary_status.upgrademodulesdisplay
+        local current = module_display.energy_level or 0
         local energy_levels = { 'ZERO', 'ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX' }
-        local fmts = {
-            CURRENT = math.floor(current + 0.5),
-            MAX = TUNING.WX78_MAXELECTRICCHARGE,
-            USED = widget.slots_in_use,
-            MESSAGE = GetMapping(qa, 'MESSAGE', energy_levels[current + 1])
-        }
-        return Announce(subfmt(qa.FORMATS.DEFAULT, fmts))
-    end
 
-    --烹饪锅
-    if HUD.controls and HUD.controls.foodcrafting and HUD.controls.foodcrafting.focus then
-        local qa = GLOBAL.NOMU_QA.SCHEME.COOK
-        if HUD.controls.foodcrafting.focusItem and HUD.controls.foodcrafting.focusItem.focus then
-            local recipe = HUD.controls.foodcrafting.focusItem.recipe
-            local popup = HUD.controls.foodcrafting.focusItem.recipepopup
-            local name = STRINGS.NAMES[string.upper(recipe.name)] or recipe.name
-            if popup and popup.focus then
-                local fmts = {
-                    TYPE = GetMapping(qa, 'TYPE', 'POS'),
-                    NAME = name
-                }
-                local fmt
-                local value
-                if popup.health and popup.health.focus then
-                    value = recipe.health
-                    fmt = qa.FORMATS.HEALTH
+        -- 计算占用电量
+        local used_slots = 0
+        if module_display.chip_slotsinuse then
+            for _, v in pairs(module_display.chip_slotsinuse) do
+                used_slots = used_slots + (tonumber(v) or 0)
+            end
+        else
+            used_slots = module_display.slots_in_use or 0
+        end
+
+        local min_x = math.huge
+        local max_x = -math.huge
+        
+        local function find_bounds(w)
+            if not w or not w.GetWorldPosition then return end
+            local px = w:GetWorldPosition().x
+            if px < min_x then min_x = px end
+            if px > max_x then max_x = px end
+            if w.children then
+                for _, child in pairs(w.children) do 
+                    find_bounds(child) 
                 end
-                if popup.sanity and popup.sanity.focus then
-                    value = recipe.sanity
-                    fmt = qa.FORMATS.SANITY
-                end
-                if popup.hunger and popup.hunger.focus then
-                    value = recipe.hunger
-                    fmt = qa.FORMATS.HUNGER
-                end
-                if value then
-                    if type(value) == 'number' and value < 0 then
-                        fmts.TYPE = GetMapping(qa, 'TYPE', 'NEG')
-                        value = -value
-                    end
-                    fmts.VALUE = not recipe.unlocked and '?' or type(value) == 'number' and value ~= 0 and string.format("%g", (math.floor(value * 10 + 0.5) / 10)) or '-'
-                    return Announce(subfmt(fmt, fmts))
-                end
-                if popup.name and popup.name.focus and popup.hunger and popup.sanity and popup.health then
-                    return Announce(subfmt(qa.FORMATS.FOOD, {
-                        NAME = name, HUNGER = popup.hunger:GetString(), SANITY = popup.sanity:GetString(), HEALTH = popup.health:GetString()
-                    }))
-                end
-                if popup.ingredients then
-                    for _, ingredient in ipairs(popup.ingredients) do
-                        if ingredient.focus then
-                            return Announce(subfmt(qa.FORMATS[ingredient.is_min and 'MIN_INGREDIENT' or ingredient.quantity > 0 and 'MAX_INGREDIENT' or 'ZERO_INGREDIENT'], {
-                                NAME = name, INGREDIENT = ingredient.localized_name, NUM = ingredient.quantity
-                            }))
+            end
+        end
+        find_bounds(module_display)
+
+        local mx = GLOBAL.TheInput:GetScreenPosition().x
+        local is_circuit_area = false
+        
+        if min_x < max_x then
+            local threshold = min_x + (max_x - min_x) * 0.70
+            if mx < threshold then 
+                is_circuit_area = true 
+            end
+        else
+            if mx < module_display:GetWorldPosition().x - 20 then 
+                is_circuit_area = true 
+            end
+        end
+
+        if is_circuit_area then
+            local counts = {}
+            local player = GLOBAL.ThePlayer
+
+            if player and player.wx78_classified and player.wx78_classified.upgrademodulebars then
+                local GetWX78ModuleByNetID = GLOBAL.require("wx78_moduledefs").GetModuleDefinitionFromNetID
+                for bartype, bars in pairs(player.wx78_classified.upgrademodulebars) do
+                    for _, module_netvar in ipairs(bars) do
+                        if module_netvar and type(module_netvar.value) == "function" then
+                            local netid = 0
+                            pcall(function() netid = module_netvar:value() end)
+                            if netid > 0 then
+                                local def = GetWX78ModuleByNetID(netid)
+                                if def then
+                                    counts[def.name] = (counts[def.name] or 0) + 1
+                                end
+                            end
                         end
                     end
                 end
+            end
+
+            local modules_str_list = {}
+            for modname, count in pairs(counts) do
+                local loc_name = GLOBAL.STRINGS.NAMES['WX78MODULE_' .. string.upper(modname)] or modname
+                local chip_fmt = qa.FORMATS.CHIP or "{NUM}个{ITEM}"
+                table.insert(modules_str_list, subfmt(chip_fmt, { ITEM = loc_name, NUM = count }))
+            end
+
+            if #modules_str_list > 0 then
+                local modules_str = table.concat(modules_str_list, "，")
+                return Announce(subfmt(qa.FORMATS.ALL_MODULES, { MODULES = modules_str }))
             else
-                if (recipe.readytocook or recipe.reqsmatch) and recipe.unlocked then
-                    return Announce(subfmt(qa.FORMATS.CAN, { NAME = name }))
-                else
-                    return Announce(subfmt(qa.FORMATS.NEED, { NAME = name }))
+                return Announce(qa.FORMATS.NO_MODULES)
+            end
+
+        else
+            return Announce(subfmt(qa.FORMATS.DEFAULT, { 
+                CURRENT = math.floor(current + 0.5), 
+                MAX = module_display.max_energy or TUNING.WX78_MAXELECTRICCHARGE or 6, 
+                USED = used_slots, 
+                MESSAGE = GetMapping(qa, 'MESSAGE', energy_levels[math.min(math.max(math.floor(current) + 1, 1), 7)]) 
+            }))
+        end
+    end
+
+    -- 烹饪/料理宣告
+    if HUD.controls 
+        and HUD.controls.foodcrafting 
+        and HUD.controls.foodcrafting.focus 
+        and HUD.controls.foodcrafting.focusItem 
+        and HUD.controls.foodcrafting.focusItem.focus then
+        
+        local qa = GLOBAL.NOMU_QA.SCHEME.COOK
+        local recipe = HUD.controls.foodcrafting.focusItem.recipe
+        local popup = HUD.controls.foodcrafting.focusItem.recipepopup
+        local name = STRINGS.NAMES[string.upper(recipe.name)] or recipe.name
+        
+        if popup and popup.focus then
+            local fmts = { TYPE = GetMapping(qa, 'TYPE', 'POS'), NAME = name }
+            local fmt, value
+            
+            if popup.health and popup.health.focus then 
+                value = recipe.health; fmt = qa.FORMATS.HEALTH 
+            end
+            if popup.sanity and popup.sanity.focus then 
+                value = recipe.sanity; fmt = qa.FORMATS.SANITY 
+            end
+            if popup.hunger and popup.hunger.focus then 
+                value = recipe.hunger; fmt = qa.FORMATS.HUNGER 
+            end
+            
+            if value then
+                if type(value) == 'number' and value < 0 then 
+                    fmts.TYPE = GetMapping(qa, 'TYPE', 'NEG')
+                    value = -value 
+                end
+                fmts.VALUE = not recipe.unlocked and '?' or type(value) == 'number' and value ~= 0 and string.format("%g", (math.floor(value * 10 + 0.5) / 10)) or '-'
+                return Announce(subfmt(fmt, fmts))
+            end
+            
+            if popup.name and popup.name.focus and popup.hunger and popup.sanity and popup.health then
+                return Announce(subfmt(qa.FORMATS.FOOD, { 
+                    NAME = name, 
+                    HUNGER = popup.hunger:GetString(), 
+                    SANITY = popup.sanity:GetString(), 
+                    HEALTH = popup.health:GetString() 
+                }))
+            end
+            
+            if popup.ingredients then
+                for _, ingredient in ipairs(popup.ingredients) do
+                    if ingredient.focus then
+                        local ing_fmt = ingredient.is_min and 'MIN_INGREDIENT' or (ingredient.quantity > 0 and 'MAX_INGREDIENT' or 'ZERO_INGREDIENT')
+                        return Announce(subfmt(qa.FORMATS[ing_fmt], { 
+                            NAME = name, 
+                            INGREDIENT = ingredient.localized_name, 
+                            NUM = ingredient.quantity 
+                        }))
+                    end
                 end
             end
+        else
+            return Announce(subfmt((recipe.readytocook or recipe.reqsmatch) and recipe.unlocked and qa.FORMATS.CAN or qa.FORMATS.NEED, { NAME = name }))
         end
     end
 end
 
--- WX78：芯片
--- local GetModuleDefinitionFromNetID = require("wx78_moduledefs").GetModuleDefinitionFromNetID
--- AddClassPostConstruct('widgets/upgrademodulesdisplay', function(UpgradeModulesDisplay)
---     local oldOnModuleAdded = UpgradeModulesDisplay.OnModuleAdded
---     function UpgradeModulesDisplay:OnModuleAdded(moduledefinition_index, ...)
---         oldOnModuleAdded(self, moduledefinition_index, ...)
---         local module_def = GetModuleDefinitionFromNetID(moduledefinition_index)
---         if module_def == nil then
---             return
---         end
---         local modname = module_def.name
---         local new_chip = self.chip_objectpool[self.chip_poolindex - 1]
---         new_chip.modname = modname
---     end
-
---     for _, chip in ipairs(UpgradeModulesDisplay.chip_objectpool) do
---         local oldOnControl = chip.OnControl
---         function chip:OnControl(control, down, ...)
---             if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
---                 local name = self.modname
---                 local num = 0
---                 for _idx, _chip in ipairs(UpgradeModulesDisplay.chip_objectpool) do
---                     if _idx < UpgradeModulesDisplay.chip_poolindex and _chip.modname == name then
---                         num = num + 1
---                     end
---                 end
---                 return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.ENERGY.FORMATS.CHIP, { ITEM = STRINGS.NAMES['WX78MODULE_' .. name:upper()], NUM = num }))
---             elseif not TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
---                 return oldOnControl(self, control, down, ...)
---             end
---         end
---     end
--- end)
-
-local needs_strings = {
-    NEEDSCIENCEMACHINE = "RESEARCHLAB",
-    NEEDALCHEMYENGINE = "RESEARCHLAB2",
-    NEEDSHADOWMANIPULATOR = "RESEARCHLAB3",
-    NEEDPRESTIHATITATOR = "RESEARCHLAB4",
-    NEEDSANCIENT_FOUR = "ANCIENT_ALTAR",
-    NEEDSFISHING = STRINGS.NOMU_QA.FISHING,
-    NEEDCARNIVAL_HOSTSHOP_PLAZA = STRINGS.NOMU_QA.CARNIVAL_HOST_SHOP_PLAZA,
-    NEEDSSEAFARING_STATION = STRINGS.NOMU_QA.SEAFARING_STATION,
-    NEEDSSPIDERFRIENDSHIP = STRINGS.NOMU_QA.SPIDER_FRIENDSHIP,
-}
-
-local hint_text = {
-    ["NEEDSSCIENCEMACHINE"] = "NEEDSCIENCEMACHINE",
-    ["NEEDSALCHEMYMACHINE"] = "NEEDALCHEMYENGINE",
-    ["NEEDSSHADOWMANIPULATOR"] = "NEEDSHADOWMANIPULATOR",
-    ["NEEDSPRESTIHATITATOR"] = "NEEDPRESTIHATITATOR",
-    ["NEEDSANCIENTALTAR_HIGH"] = "NEEDSANCIENT_FOUR",
-    ["NEEDSSPIDERCRAFT"] = "NEEDSSPIDERFRIENDSHIP",
-}
-
+-- [6] 物品配方与容器相关方法
 local function GetPrototype(knows, recipe, owner)
-    local prototyper
+    local prototyper, raw_tech
     if not knows then
         local details = ThePlayer.HUD.controls.craftingmenu.craftingmenu.details_root
-        local prototyper_tree = details:_GetHintTextForRecipe(owner, recipe)
-        local str = STRINGS.UI.CRAFTING[hint_text[prototyper_tree] or prototyper_tree]
-        local CRAFTING = STRINGS.UI.CRAFTING
-        for needs_string, prototyper_prefab in pairs(needs_strings) do
-            if str == CRAFTING[needs_string] then
-                prototyper = STRINGS.NAMES[prototyper_prefab] or prototyper_prefab
-            end
+        raw_tech = details:_GetHintTextForRecipe(owner, recipe)
+        
+        local qa_recipe = GLOBAL.NOMU_QA.SCHEME.RECIPE
+        if qa_recipe 
+            and qa_recipe.MAPPINGS 
+            and qa_recipe.MAPPINGS.DEFAULT 
+            and qa_recipe.MAPPINGS.DEFAULT.PROTOTYPER then
+            
+            prototyper = qa_recipe.MAPPINGS.DEFAULT.PROTOTYPER[raw_tech]
         end
-        prototyper = prototyper or STRINGS.NOMU_QA.UNKNOWN_PROTOTYPE
+        
+        prototyper = prototyper or (qa_recipe 
+            and qa_recipe.MAPPINGS 
+            and qa_recipe.MAPPINGS.DEFAULT 
+            and qa_recipe.MAPPINGS.DEFAULT.PROTOTYPER 
+            and qa_recipe.MAPPINGS.DEFAULT.PROTOTYPER["UNKNOWN_PROTOTYPE"]) 
     end
-    return prototyper or ''
+    return prototyper or '', raw_tech or ''
 end
 
-local function AnnounceSkin(recipepopup)
-    if not recipepopup.focus then
-        return
-    end
-    local skin_name = recipepopup.skins_spinner and recipepopup.skins_spinner.GetItem()
-    if skin_name == nil then
-        skin_name = recipepopup.GetItem and recipepopup:GetItem()
-    end
-    local qa = GLOBAL.NOMU_QA.SCHEME.SKIN
-    local item_name = STRINGS.NAMES[string.upper(recipepopup.recipe.product)] or recipepopup.recipe.name
-    if skin_name == nil then
-        local n_options = #recipepopup.skins_options
-        if n_options == 1 then
-            local prefab = recipepopup.recipe.product or recipepopup.recipe.name
-            if not PREFAB_SKINS[prefab] or #PREFAB_SKINS[prefab] == 0 then
-                return Announce(subfmt(qa.FORMATS.NO_SKIN, { ITEM = item_name }))
-            else
-                return Announce(subfmt(qa.FORMATS.HAS_NO_SKIN, { ITEM = item_name }))
+local function GetAllMissingIngredients(recipe, builder, inventory)
+    if not recipe then return nil end
+    local missing = {}
+    
+    if recipe.ingredients then
+        for _, v in pairs(recipe.ingredients) do
+            local actual_needed = RoundBiasedUp(v.amount * builder:IngredientMod())
+            local _, num_found = inventory:Has(v.type, actual_needed)
+            if num_found < actual_needed then 
+                local diff = actual_needed - num_found
+                local item_name = STRINGS.NOMU_QA[string.upper(v.type)] or STRINGS.NAMES[string.upper(v.type)] or v.type
+                table.insert(missing, diff .. "个" .. item_name) 
             end
         end
-        return
     end
-    if skin_name ~= item_name then
-        local prefab = recipepopup.recipe.product or recipepopup.recipe.name
-        local num = #recipepopup.skins_options - 1
-        local total = PREFAB_SKINS[prefab] and #PREFAB_SKINS[prefab] or num
-        return Announce(subfmt(qa.FORMATS.DEFAULT, { SKIN = GetSkinName(skin_name), ITEM = item_name, NUM = num, TOTAL = total }))
+    
+    if recipe.character_ingredients then
+        for _, v in pairs(recipe.character_ingredients) do
+            local _, num_found = builder:HasCharacterIngredient(v)
+            if num_found < v.amount then 
+                local diff = v.amount - num_found
+                local item_name = STRINGS.NOMU_QA[string.upper(v.type)] or STRINGS.NAMES[string.upper(v.type)] or v.type
+                table.insert(missing, diff .. "个" .. item_name) 
+            end
+        end
     end
+    
+    return #missing > 0 and table.concat(missing, ", ") or nil
 end
 
-local function AnnounceRecipePinSlot(slot, recipepopup, ingnum)
-    local recipe = slot.craftingmenu:GetRecipeState(slot.recipe_name)
-    if not recipe or not recipe.recipe then
-        return
-    end
-    recipe = recipe.recipe
-    local builder = slot.owner.replica.builder
+local function AnnounceMergedRecipe(recipe, builder, inventory, owner, specific_ingredient_type)
+    if not recipe then return end
+    
     local buffered = builder:IsBuildBuffered(recipe.name)
     local knows = builder:KnowsRecipe(recipe.name) or CanPrototypeRecipe(recipe.level, builder:GetTechTrees())
     local can_build = builder:CanBuild(recipe.name)
-    local strings_name = STRINGS.NAMES[recipe.product:upper()] or STRINGS.NAMES[recipe.name:upper()]
+    
+    local strings_name = STRINGS.NOMU_QA[recipe.product:upper()] 
+                      or STRINGS.NAMES[recipe.product:upper()] 
+                      or STRINGS.NOMU_QA[recipe.name:upper()] 
+                      or STRINGS.NAMES[recipe.name:upper()]
+                      
     local name = strings_name and strings_name:lower() or STRINGS.NOMU_QA.UNKNOWN_NAME
-
-    local ingredient
-    recipepopup = recipepopup or slot.recipe_popup
-    local ing = recipepopup.ing
-    if ing == nil then
-        ing = {}
-        local ingredients
-        if not recipepopup or not recipepopup.ingredients or not recipepopup.ingredients.children then
-            return
-        end
-        for _, v in pairs(recipepopup.ingredients.children) do
-            ingredients = v
-            break
-        end
-        if ingredients ~= nil then
-            for _, v in pairs(ingredients.children) do
-                table.insert(ing, v)
-            end
-        end
+    name = ApplyCustomName(recipe.product or recipe.name, name)
+    
+    local prototype, raw_tech = GetPrototype(knows, recipe, owner)
+    
+    local debug_str = string.format("[配方代码: %s]", tostring(recipe.name))
+    if raw_tech and raw_tech ~= "" then
+        debug_str = debug_str .. string.format(" [科技代码: %s]", string.lower(tostring(raw_tech)))
     end
-    if ingnum == nil then
-        for _, _ing in ipairs(ing) do
-            if _ing.focus then
-                ingredient = _ing
-            end
-        end
-    else
-        ingredient = ing[ingnum]
-    end
-    if ingnum and ingredient == nil then
-        return
+    
+    local qa_recipe = GLOBAL.NOMU_QA.SCHEME.RECIPE
+    local qa_ing = GLOBAL.NOMU_QA.SCHEME.INGREDIENT
+    
+    if buffered then 
+        return Announce(subfmt(qa_recipe.FORMATS.BUFFERED, {ITEM = name, PROTOTYPE = prototype}), nil, debug_str)
+    elseif can_build and knows then 
+        return Announce(subfmt(qa_recipe.FORMATS.WILL_MAKE, {ITEM = name, PROTOTYPE = prototype}), nil, debug_str) 
     end
 
-    local prototype = GetPrototype(knows, recipe, slot.owner)
+    if not GLOBAL.NOMU_QA.DATA.ANNOUNCE_ALL_MISSING_INGREDIENTS and specific_ingredient_type then
+        local amount_needed, num_found = 1, 0
+        
+        for _, v in pairs(recipe.ingredients) do 
+            if specific_ingredient_type == v.type then 
+                amount_needed = v.amount 
+            end 
+        end
+        
+        _, num_found = inventory:Has(specific_ingredient_type, RoundBiasedUp(amount_needed * builder:IngredientMod()))
 
-    if ingredient == nil then
-        local fmts = {
-            ITEM = name,
-            PROTOTYPE = prototype
-        }
-        local qa = GLOBAL.NOMU_QA.SCHEME.RECIPE
-        if buffered then
-            return Announce(subfmt(qa.FORMATS.BUFFERED, fmts))
-        elseif can_build and knows then
-            return Announce(subfmt(qa.FORMATS.WILL_MAKE, fmts))
-        elseif knows then
-            return Announce(subfmt(qa.FORMATS.WE_NEED, fmts))
-        else
-            return Announce(subfmt(qa.FORMATS.CAN_SOMEONE, fmts))
-        end
-    else
-        local num = 0
-        local ingname
-        local ingtooltip
-        if ingredient.ing then
-            ingname = ingredient.ing.texture:sub(1, -5)
-            ingtooltip = ingredient.tooltip
-        else
-            ingname = recipepopup and recipepopup.recipe and recipepopup.recipe.ingredients and recipepopup.recipe.ingredients[1] and recipepopup.recipe.ingredients[1].type
-            if not ingname then return end
-            ingtooltip = STRINGS.NAMES[string.upper(ingname)]
-        end
-        local amount_needed = 1
-        for _, v in pairs(recipe.ingredients) do
-            if ingname == v.type then
-                amount_needed = v.amount
+        if recipe.character_ingredients then
+            for _, v in pairs(recipe.character_ingredients) do
+                if specific_ingredient_type == v.type then 
+                    amount_needed = v.amount
+                    _, num_found = builder:HasCharacterIngredient(v) 
+                end
             end
         end
-        local has, num_found = slot.owner.replica.inventory:Has(ingname, RoundBiasedUp(amount_needed * slot.owner.replica.builder:IngredientMod()))
-        for _, v in pairs(recipe.character_ingredients) do
-            if ingname == v.type then
-                amount_needed = v.amount
-                has, num_found = slot.owner.replica.builder:HasCharacterIngredient(v)
-            end
-        end
-        num = amount_needed - num_found
-        local can_make = math.floor(num_found / amount_needed) * recipe.numtogive
-        if amount_needed == 0 then
-            num = num_found > 0 and 0 or 1
-            can_make = ''
-        end
-        local ingredient_str = (ingtooltip or STRINGS.NOMU_QA.UNKNOWN_NAME):lower()
-        local p = string.find(ingredient_str, '\n')
-        if p then
-            ingredient_str = string.sub(ingredient_str, 0, p - 1)
-        end
 
-        local qa = GLOBAL.NOMU_QA.SCHEME.INGREDIENT
-        local fmts = {
-            AND_PROTOTYPE = '',
-            BUT_PROTOTYPE = '',
-            INGREDIENT = ingredient_str,
-            RECIPE = name,
+        local num = amount_needed - num_found
+        local ingredient_name = STRINGS.NOMU_QA[specific_ingredient_type:upper()] 
+                             or STRINGS.NAMES[specific_ingredient_type:upper()] 
+                             or specific_ingredient_type
+                             
+        local fmts = { 
+            AND_PROTOTYPE = '', 
+            BUT_PROTOTYPE = '', 
+            RECIPE = name 
         }
 
         if num > 0 then
             fmts.NUM = num
-            if prototype ~= "" then
-                fmts.AND_PROTOTYPE = subfmt(GetMapping(qa, 'WORDS', 'AND_PROTOTYPE'), { PROTOTYPE = prototype })
+            fmts.INGREDIENT = subfmt(GetMapping(qa_ing, 'WORDS', 'ITEM_AMOUNT_FORMAT'), { NUM = num, ITEM = ingredient_name })
+            if prototype ~= "" then 
+                fmts.AND_PROTOTYPE = subfmt(GetMapping(qa_ing, 'WORDS', 'AND_PROTOTYPE'), { PROTOTYPE = prototype }) 
             end
-            return Announce(subfmt(qa.FORMATS.NEED, fmts))
+            return Announce(subfmt(qa_ing.FORMATS.NEED or qa_ing.FORMATS.NEED_MULTIPLE, fmts), nil, debug_str)
         else
-            fmts.NUM = can_make
-            if prototype ~= "" then
-                fmts.BUT_PROTOTYPE = subfmt(GetMapping(qa, 'WORDS', 'BUT_PROTOTYPE'), { PROTOTYPE = prototype })
+            fmts.NUM = math.floor(num_found / amount_needed) * (recipe.numtogive or 1)
+            fmts.INGREDIENT = ingredient_name
+            if prototype ~= "" then 
+                fmts.BUT_PROTOTYPE = subfmt(GetMapping(qa_ing, 'WORDS', 'BUT_PROTOTYPE'), { PROTOTYPE = prototype }) 
             end
-            return Announce(subfmt(qa.FORMATS.HAVE, fmts))
+            return Announce(subfmt(qa_ing.FORMATS.HAVE or qa_ing.FORMATS.HAVE_ALL, fmts), nil, debug_str)
         end
+    end
+
+    if not GLOBAL.NOMU_QA.DATA.ANNOUNCE_ALL_MISSING_INGREDIENTS and not specific_ingredient_type then
+        return Announce(subfmt(qa_recipe.FORMATS[knows and "WE_NEED" or "CAN_SOMEONE"], {ITEM = name, PROTOTYPE = prototype}), nil, debug_str)
+    end
+
+    local missing_str = GetAllMissingIngredients(recipe, builder, inventory)
+    if missing_str then
+        local and_proto = prototype ~= "" and subfmt(GetMapping(qa_ing, 'WORDS', 'AND_PROTOTYPE'), { PROTOTYPE = prototype }) or ""
+        local fmt_str = (qa_ing.FORMATS.NEED_MULTIPLE or qa_ing.FORMATS.NEED):gsub("{NUM}" .. GLOBAL.STRINGS.NOMU_QA.MEASURE_WORD .. "%s*", ""):gsub("{NUM}%s*", "")
+        
+        return Announce(subfmt(fmt_str, { 
+            INGREDIENT = missing_str, 
+            RECIPE = name, 
+            AND_PROTOTYPE = and_proto, 
+            NUM = "" 
+        }), nil, debug_str)
+    else
+        local but_proto = prototype ~= "" and subfmt(GetMapping(qa_ing, 'WORDS', 'BUT_PROTOTYPE'), { PROTOTYPE = prototype }) or ""
+        local all_materials = GetMapping(qa_ing, 'WORDS', 'ALL_MATERIALS') 
+        local fmt_str = (qa_ing.FORMATS.HAVE_ALL or qa_ing.FORMATS.HAVE):gsub("{NUM}" .. GLOBAL.STRINGS.NOMU_QA.MEASURE_WORD .. "%s*{INGREDIENT}", all_materials):gsub("{NUM}%s*{INGREDIENT}", all_materials)
+        
+        return Announce(subfmt(fmt_str, { 
+            RECIPE = name, 
+            BUT_PROTOTYPE = but_proto, 
+            INGREDIENT = all_materials, 
+            ALL_MATERIALS = all_materials, 
+            NUM = "" 
+        }), nil, debug_str)
     end
 end
 
-local function AnnounceRecipeGrid(grid, owner)
-    local focused_item_index = grid.focused_widget_index + grid.displayed_start_index
-    local recipe
-    if grid.focus and #grid.items > 0 and grid.items[focused_item_index] then
-        recipe = grid.items[focused_item_index].recipe
+local ITEM_PREFAB_ALIAS = { 
+    deer_antler1 = "deer_antler", 
+    deer_antler2 = "deer_antler", 
+    deer_antler3 = "deer_antler" 
+}
+local RECHARGEABLE_PREFABS = { 
+    pocketwatch_heal = TUNING.POCKETWATCH_HEAL_COOLDOWN, 
+    pocketwatch_revive = TUNING.POCKETWATCH_REVIVE_COOLDOWN, 
+    pocketwatch_warp = TUNING.POCKETWATCH_WARP_COOLDOWN, 
+    pocketwatch_recall = TUNING.POCKETWATCH_RECALL_COOLDOWN, 
+    pocketwatch_portal = TUNING.POCKETWATCH_RECALL_COOLDOWN 
+}
+
+local function CountItems(container, name, target_prefab, use_alias)
+    local num_found = 0
+    if not container then return 0 end
+    
+    local function check_item(v)
+        if v and v:GetDisplayName() == name then
+            if (use_alias and ITEM_PREFAB_ALIAS[v.prefab] == target_prefab) or (not use_alias and v.prefab == target_prefab) then
+                return v.replica.stackable and v.replica.stackable:StackSize() or 1
+            end
+        end
+        return 0
     end
-    if not recipe then
+    
+    for _, v in pairs(container:GetItems()) do 
+        num_found = num_found + check_item(v) 
+    end
+
+    if container.GetBoatEquips then
+        for _, v in pairs(container:GetBoatEquips()) do
+            num_found = num_found + check_item(v)
+        end
+    end
+    
+    if container.GetActiveItem then 
+        num_found = num_found + check_item(container:GetActiveItem()) 
+    end
+    
+    if container.GetOverflowContainer and container:GetOverflowContainer() then 
+        num_found = num_found + CountItems(container:GetOverflowContainer(), name, target_prefab, use_alias) 
+    end
+    
+    return num_found
+end
+
+local function get_container_name(container)
+    if not container then return end
+    
+    local name = container:GetBasicDisplayName()
+    local prefab = container.prefab
+    
+    if type(name) == "string" and name:find("^%s*$") and prefab and prefab:find("_container") then 
+        name = STRINGS.NAMES[prefab:sub(1, prefab:find("_container") - 1):upper()] 
+    end
+    
+    return prefab and STRINGS.NOMU_QA[prefab:upper()] or (name and name:lower()) 
+end
+
+local function GetEquipSlotName(qa, equipslot)
+    if not equipslot then return nil end
+    local key = string.upper(tostring(equipslot))
+    local mapping = { 
+        HEAD="SLOT_HEAD", 
+        HANDS="SLOT_HANDS", 
+        BODY="SLOT_BODY", 
+        BACK="SLOT_BACK", 
+        NECK="SLOT_NECK", 
+        BELLY="SLOT_BELLY", 
+        MEDAL="SLOT_MEDAL" 
+    }
+    
+    for k, v in pairs(GLOBAL.EQUIPSLOTS) do 
+        if equipslot == v then 
+            key = k
+            break 
+        end 
+    end
+    
+    return mapping[key] and GetMapping(qa, 'WORDS', mapping[key]) or nil
+end
+
+local function AnnounceItem(slot, classname)
+    local item = slot.tile.item
+    local container = (slot.container == nil or slot.container.type == "pack") and ThePlayer.replica.inventory or slot.container
+    local percent, percent_type
+    
+    if slot.tile.percent then 
+        percent = slot.tile.percent:GetString()
+        percent_type = "DURABILITY"
+    elseif slot.tile.hasspoilage and item.replica.inventoryitem and item.replica.inventoryitem.classified then 
+        percent = math.floor(item.replica.inventoryitem.classified.perish:value() * (1 / .62)) .. "%"
+        percent_type = "FRESHNESS" 
+    end
+    
+    local num_equipped, num_equipped_name = 0, 0
+    if not container.type then
+        for _, _slot in pairs(EQUIPSLOTS) do
+            local eq = container:GetEquippedItem(_slot)
+            if eq and eq.prefab == item.prefab then
+                local s = eq.replica.stackable and eq.replica.stackable:StackSize() or 1
+                num_equipped = num_equipped + s
+                if eq.name == item.name then 
+                    num_equipped_name = num_equipped_name + s 
+                end
+            end
+        end
+    end
+    
+    local container_name = get_container_name(container.type and container.inst)
+    if not container_name then
+        local cb = container.inst.entity:GetParent() and container.inst.entity:GetParent().components.constructionbuilder
+        if cb and cb.constructionsite then 
+            container_name = get_container_name(cb.constructionsite) 
+        end
+    end
+
+    local name = item.prefab and (STRINGS.NOMU_QA[item.prefab:upper()] or STRINGS.NAMES[item.prefab:upper()]) or STRINGS.NOMU_QA.UNKNOWN_NAME
+    name = ApplyCustomName(item.prefab, name)
+    
+    local num_found = container:Has(item.prefab, 1) and (
+        ITEM_PREFAB_ALIAS[item.prefab] and CountItems(container, item:GetDisplayName(), ITEM_PREFAB_ALIAS[item.prefab], true) 
+        or CountItems(container, item:GetDisplayName(), item.prefab, false)
+    ) or 0
+    
+    local num_found_name = (
+        ITEM_PREFAB_ALIAS[item.prefab] and CountItems(container, item:GetDisplayName(), ITEM_PREFAB_ALIAS[item.prefab], true) 
+        or CountItems(container, item:GetDisplayName(), item.prefab, false)
+    ) + num_equipped_name
+    
+    num_found = num_found + num_equipped
+    local item_name = string.gsub(item:GetBasicDisplayName(), '\n', '')
+
+    -- 应用通用的字符串前缀清理优化
+    if name ~= STRINGS.NOMU_QA.UNKNOWN_NAME then
+        name = CleanPrefixName(item:GetDisplayName(), item.prefab and STRINGS.NAMES[item.prefab:upper()], name)
+    end
+    
+    if name == STRINGS.NOMU_QA.UNKNOWN_NAME and num_found == num_found_name then 
+        name = item:GetDisplayName():gsub('\n', '') 
+    end
+
+    local qa = GLOBAL.NOMU_QA.SCHEME.ITEM
+
+    local is_target_prefab = item.prefab and (
+        item.prefab:find("certificate") 
+        or item.prefab:find("blueprint") 
+        or item.prefab:find("sketch") 
+        or item.prefab == "cookingrecipecard"
+    )
+    if is_target_prefab then
+        name = item_name
+    end
+
+    local fmts = { 
+        PRONOUN = GetMapping(qa, 'PRONOUN', 'I'), 
+        NUM = num_found, 
+        EQUIP_NUM = num_equipped, 
+        ITEM = name, 
+        IN_CONTAINER = '', 
+        WITH_PERCENT = '', 
+        POST_STATE = '', 
+        SHOW_ME = '', 
+        ITEM_NUM = num_equipped ~= num_found and subfmt(GetMapping(qa, 'WORDS', 'ITEM_NUM'), { NUM = num_found }) or '' 
+    }
+
+    local is_qa_item = item.prefab and STRINGS.NOMU_QA[item.prefab:upper()] ~= nil
+    local default_name = item.prefab and (STRINGS.NOMU_QA[item.prefab:upper()] or STRINGS.NAMES[item.prefab:upper()]) or ""
+    local is_custom_named = false
+
+    if not is_qa_item then
+        is_custom_named = item_name ~= "" 
+                         and item_name ~= "MISSING NAME" 
+                         and item_name ~= default_name 
+                         and item_name ~= name 
+                         and not is_target_prefab
+    end
+
+    if is_custom_named then
+        fmts.ITEM_NAME = subfmt(GetMapping(qa, 'WORDS', 'ITEM_NAME'), { NUM = num_found_name, NAME = item_name })
+    else 
+        fmts.ITEM_NAME = '' 
+    end
+
+    if container_name then 
+        fmts.PRONOUN = GetMapping(qa, 'PRONOUN', 'WE')
+        fmts.IN_CONTAINER = subfmt(GetMapping(qa, 'WORDS', 'IN_CONTAINER'), { NAME = container_name }) 
+    end
+    
+    if percent then 
+        fmts.WITH_PERCENT = subfmt(GetMapping(qa, 'WORDS', 'WITH_PERCENT'), { 
+            THIS_ONE = num_found > 1 and GetMapping(qa, 'WORDS', 'THIS_ONE') or '', 
+            PERCENT = percent, 
+            TYPE = GetMapping(qa, 'PERCENT_TYPE', percent_type) 
+        }) 
+    end
+
+    if item.prefab == 'heatrock' and item.replica and item.replica.inventoryitem and item.replica.inventoryitem.GetImage then
+        local range = { 
+            [4264163310]=1, [3706253814]=1, [2098310090]=1, 
+            [1108760303]=2, [550850807]=2, [3237874379]=2, 
+            [2248324592]=3, [1690415096]=3, [82471372]=3, 
+            [3387888881]=4, [2829979385]=4, [1222035661]=4, 
+            [232485874]=5, [3969543674]=5, [2361599950]=5 
+        }
+        local img = item.replica.inventoryitem:GetImage()
+        if range[img] then 
+            local heat_states = { 'COLD', 'COOL', 'NORMAL', 'WARM', 'HOT' }
+            fmts.POST_STATE = GetMapping(qa, 'HEAT_ROCK', heat_states[range[img]]) 
+        end
+    end
+
+    if RECHARGEABLE_PREFABS[item.prefab] and item.replica.inventoryitem.classified then
+        local seconds = (180 - item.replica.inventoryitem.classified.recharge:value()) / 180 * RECHARGEABLE_PREFABS[item.prefab]
+        if seconds == 0 then 
+            fmts.POST_STATE = GetMapping(qa, 'RECHARGE', 'FULL') 
+        else 
+            fmts.POST_STATE = subfmt(GetMapping(qa, 'RECHARGE', 'CHARGING'), { 
+                TIME = (math.modf(seconds / 60) > 0 and math.modf(seconds / 60) .. GetMapping(qa, 'TIME', 'MINUTES') or '') 
+                    .. math.modf(math.fmod(seconds, 60)) .. GetMapping(qa, 'TIME', 'SECONDS') 
+            }) 
+        end
+    end
+
+    local start_line = #(string.split(item:GetDisplayName(), '\n')) + (classname == 'invslot' and 3 or 2)
+    local show_me_str = GetShowMeString(item, qa, start_line, -1)
+    if show_me_str ~= "" then 
+        fmts.SHOW_ME = show_me_str 
+    end
+
+    local result_str
+    if classname == 'invslot' then 
+        result_str = subfmt(qa.FORMATS.INV_SLOT, fmts) 
+    else
+        local slot_pos_name = GetEquipSlotName(qa, slot.equipslot)
+        if slot_pos_name then 
+            fmts.SLOT_POS = slot_pos_name
+            fmts.v = slot_pos_name
+            result_str = subfmt(qa.FORMATS.EQUIP_SLOT_POS, fmts) 
+        else 
+            result_str = subfmt(qa.FORMATS.EQUIP_SLOT, fmts) 
+        end
+    end
+
+    local debug_txt = GLOBAL.NOMU_QA.DATA.DEBUG_MODE and string.format(
+        "[物品代码: %s, 容器代码: %s, 槽位代码: %s]", 
+        tostring(item.prefab), 
+        container and (container.inst and container.inst.prefab or container.type or "inventory") or "无", 
+        classname == 'equipslot' and tostring(slot.equipslot) or "inv_" .. tostring(slot.num)
+    ) or ""
+    
+    return Announce(result_str, nil, debug_txt)
+end
+
+local function AnnounceConstructionSite(site, container_widget, slot_index)
+    local site_rep = site.replica.constructionsite
+    if not site_rep then return false end
+    
+    local plans = site_rep:GetIngredients() 
+               or GLOBAL.CONSTRUCTION_PLANS[site.prefab] 
+               or (site.nameoverride and GLOBAL.CONSTRUCTION_PLANS[site.nameoverride])
+    if not plans then return false end
+    
+    local container_rep = container_widget and container_widget.inst and container_widget.inst.replica.container
+    local site_name = (site:GetDisplayName() 
+                    or GLOBAL.STRINGS.NOMU_QA[site.prefab:upper()] 
+                    or GLOBAL.STRINGS.NAMES[site.prefab:upper()] 
+                    or site.prefab):gsub('\n', ' ')
+                    
+    site_name = ApplyCustomName(site.prefab, site_name)
+    
+    local qa_const = (site:HasTag("offerconstructionsite") 
+                   or (container_widget and container_widget.inst and container_widget.inst:HasTag("offerconstructionsite"))) 
+                   and GLOBAL.NOMU_QA.SCHEME.TRADE 
+                   or GLOBAL.NOMU_QA.SCHEME.CONSTRUCTION
+                   
+    local debug_str = GLOBAL.NOMU_QA.DATA.DEBUG_MODE and string.format(
+        "[施工点代码: %s, 容器代码: %s]", 
+        tostring(site.prefab), 
+        tostring(container_widget and container_widget.inst and container_widget.inst.prefab or "无")
+    ) or nil
+
+    if not GLOBAL.NOMU_QA.DATA.ANNOUNCE_ALL_MISSING_INGREDIENTS and slot_index and plans[slot_index] then
+        local plan = plans[slot_index]
+        local current = (site_rep:GetSlotCount(slot_index) or 0) 
+                      + (container_rep and container_rep:GetItemInSlot(slot_index) 
+                      and (container_rep:GetItemInSlot(slot_index).replica.stackable 
+                      and container_rep:GetItemInSlot(slot_index).replica.stackable:StackSize() or 1) or 0)
+        local missing = plan.amount - current
+        local ing_name = GLOBAL.STRINGS.NOMU_QA[plan.type:upper()] or GLOBAL.STRINGS.NAMES[plan.type:upper()] or plan.type
+        
+        if missing > 0 then 
+            return Announce(subfmt(qa_const.FORMATS.NEED, { 
+                INGREDIENT = missing .. "个" .. ing_name, 
+                RECIPE = site_name 
+            }), nil, debug_str)
+        else 
+            return Announce(subfmt(qa_const.FORMATS.HAVE:gsub("所有材料", plan.amount .. "个" .. ing_name), { 
+                RECIPE = site_name, 
+                INGREDIENT = plan.amount .. "个" .. ing_name 
+            }), nil, debug_str) 
+        end
+    end
+
+    local missing, total_req = {}, {}
+    for i, plan in ipairs(plans) do
+        local current = (site_rep:GetSlotCount(i) or 0) 
+                      + (container_rep and container_rep:GetItemInSlot(i) 
+                      and (container_rep:GetItemInSlot(i).replica.stackable 
+                      and container_rep:GetItemInSlot(i).replica.stackable:StackSize() or 1) or 0)
+        local name = GLOBAL.STRINGS.NOMU_QA[plan.type:upper()] or GLOBAL.STRINGS.NAMES[plan.type:upper()] or plan.type
+        
+        table.insert(total_req, plan.amount .. "个" .. name)
+        if plan.amount - current > 0 then 
+            table.insert(missing, (plan.amount - current) .. "个" .. name) 
+        end
+    end
+    
+    if #missing > 0 then 
+        return Announce(subfmt(qa_const.FORMATS.NEED, { 
+            INGREDIENT = table.concat(missing, ", "), 
+            RECIPE = site_name 
+        }), nil, debug_str)
+    else 
+        return Announce(subfmt(qa_const.FORMATS.HAVE, { 
+            RECIPE = site_name, 
+            INGREDIENT = table.concat(total_req, ", ") 
+        }), nil, debug_str) 
+    end
+end
+
+local function AnnounceSkin(recipepopup)
+    if not recipepopup.focus then return end
+    
+    local skin_name = recipepopup.skins_spinner and recipepopup.skins_spinner.GetItem() 
+                   or (recipepopup.GetItem and recipepopup:GetItem())
+    local item_name = STRINGS.NAMES[string.upper(recipepopup.recipe.product)] or recipepopup.recipe.name
+    
+    if skin_name == nil then
+        if #recipepopup.skins_options == 1 then
+            local prefab = recipepopup.recipe.product or recipepopup.recipe.name
+            return Announce(subfmt(
+                GLOBAL.NOMU_QA.SCHEME.SKIN.FORMATS[(not PREFAB_SKINS[prefab] or #PREFAB_SKINS[prefab] == 0) and "NO_SKIN" or "HAS_NO_SKIN"], 
+                { ITEM = item_name }
+            ))
+        end
         return
     end
-    local builder = owner.replica.builder
-    local buffered = builder:IsBuildBuffered(recipe.name)
-    local knows = builder:KnowsRecipe(recipe.name) or CanPrototypeRecipe(recipe.level, builder:GetTechTrees())
-    local can_build = builder:CanBuild(recipe.name)
-    local strings_name = STRINGS.NAMES[recipe.product:upper()] or STRINGS.NAMES[recipe.name:upper()]
-    local name = strings_name and strings_name:lower() or STRINGS.NOMU_QA.UNKNOWN_NAME
+    
+    if skin_name ~= item_name then
+        local prefab = recipepopup.recipe.product or recipepopup.recipe.name
+        local num = #recipepopup.skins_options - 1
+        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SKIN.FORMATS.DEFAULT, { 
+            SKIN = GetSkinName(skin_name), 
+            ITEM = item_name, 
+            NUM = num, 
+            TOTAL = PREFAB_SKINS[prefab] and #PREFAB_SKINS[prefab] or num 
+        }))
+    end
+end
 
-    local prototype = GetPrototype(knows, recipe, owner)
-    local fmts = {
-        ITEM = name,
-        PROTOTYPE = prototype
-    }
-    local qa = GLOBAL.NOMU_QA.SCHEME.RECIPE
-    if buffered then
-        return Announce(subfmt(qa.FORMATS.BUFFERED, fmts))
-    elseif can_build and knows then
-        return Announce(subfmt(qa.FORMATS.WILL_MAKE, fmts))
-    elseif knows then
-        return Announce(subfmt(qa.FORMATS.WE_NEED, fmts))
-    else
-        return Announce(subfmt(qa.FORMATS.CAN_SOMEONE, fmts))
+local function AnnounceRecipePinSlot(slot, recipepopup, ingnum)
+    local recipe_state = slot.craftingmenu:GetRecipeState(slot.recipe_name)
+    if not recipe_state or not recipe_state.recipe then return end
+    
+    local specific_ingredient_type = nil
+    
+    recipepopup = recipepopup or slot.recipe_popup
+    if recipepopup then
+        local ing = recipepopup.ing or {}
+        if #ing == 0 and recipepopup.ingredients and recipepopup.ingredients.children then
+            local root = next(recipepopup.ingredients.children) and recipepopup.ingredients.children[next(recipepopup.ingredients.children)]
+            if root then 
+                for _, v in pairs(root.children) do 
+                    table.insert(ing, v) 
+                end 
+            end
+        end
+        
+        local ingredient = ingnum and ing[ingnum] or nil
+        if not ingredient then 
+            for _, _ing in ipairs(ing) do 
+                if _ing.focus then ingredient = _ing end 
+            end 
+        end
+        
+        if ingredient and ingredient.ing and ingredient.ing.texture then 
+            specific_ingredient_type = ingredient.ing.texture:sub(1, -5)
+        elseif ingredient and not ingredient.ing and recipepopup.recipe and recipepopup.recipe.ingredients and recipepopup.recipe.ingredients[1] then 
+            specific_ingredient_type = recipepopup.recipe.ingredients[1].type 
+        end
+    end
+    
+    return AnnounceMergedRecipe(
+        recipe_state.recipe, 
+        slot.owner.replica.builder, 
+        slot.owner.replica.inventory, 
+        slot.owner, 
+        specific_ingredient_type
+    )
+end
+
+local function AnnounceRecipeGrid(grid, owner)
+    local idx = grid.focused_widget_index + grid.displayed_start_index
+    if grid.focus and #grid.items > 0 and grid.items[idx] then
+        return AnnounceMergedRecipe(
+            grid.items[idx].recipe, 
+            owner.replica.builder, 
+            owner.replica.inventory, 
+            owner, 
+            nil
+        )
     end
 end
 
 local function AnnounceRecipeCMIngredients(ingredients)
     local recipe = ingredients.recipe
-    if not recipe then
-        return
-    end
-    local builder = ingredients.owner.replica.builder
-    local knows = builder:KnowsRecipe(recipe.name) or CanPrototypeRecipe(recipe.level, builder:GetTechTrees())
-    local strings_name = STRINGS.NAMES[recipe.product:upper()] or STRINGS.NAMES[recipe.name:upper()]
-    local name = strings_name and strings_name:lower() or STRINGS.NOMU_QA.UNKNOWN_NAME
-
-    local ingredient
-
-    local ing = {}
-    local ingredients_root
-    for _, v in pairs(ingredients.children) do
-        ingredients_root = v
-        break
-    end
-    if ingredients_root ~= nil then
-        for _, v in pairs(ingredients_root.children) do
-            table.insert(ing, v)
+    if not recipe then return end
+    
+    local specific_ingredient_type = nil
+    local root = ingredients.children and next(ingredients.children) and ingredients.children[next(ingredients.children)]
+    
+    if root and root.children then
+        for _, _ing in pairs(root.children) do
+            if _ing.focus and _ing.ing and _ing.ing.texture then 
+                specific_ingredient_type = _ing.ing.texture:sub(1, -5) 
+            end
         end
     end
-
-    for _, _ing in ipairs(ing) do
-        if _ing.focus then
-            ingredient = _ing
-        end
-    end
-
-    if ingredient == nil then
-        return
-    end
-    local prototype = GetPrototype(knows, recipe, ingredients.owner)
-    local num = 0
-    local ingname
-    local ingtooltip
-    if ingredient.ing then
-        ingname = ingredient.ing.texture:sub(1, -5)
-        ingtooltip = ingredient.tooltip
-    end
-
-    local amount_needed = 1
-    for _, v in pairs(recipe.ingredients) do
-        if ingname == v.type then
-            amount_needed = v.amount
-        end
-    end
-    local has, num_found = ingredients.owner.replica.inventory:Has(ingname, RoundBiasedUp(amount_needed * ingredients.owner.replica.builder:IngredientMod()))
-    for _, v in pairs(recipe.character_ingredients) do
-        if ingname == v.type then
-            amount_needed = v.amount
-            has, num_found = ingredients.owner.replica.builder:HasCharacterIngredient(v)
-        end
-    end
-    num = amount_needed - num_found
-    local can_make = math.floor(num_found / amount_needed) * recipe.numtogive
-    if amount_needed == 0 then
-        num = num_found > 0 and 0 or 1
-        can_make = ''
-    end
-    local ingredient_str = (ingtooltip or STRINGS.NOMU_QA.UNKNOWN_NAME):lower()
-    local p = string.find(ingredient_str, '\n')
-    if p then
-        ingredient_str = string.sub(ingredient_str, 0, p - 1)
-    end
-    local qa = GLOBAL.NOMU_QA.SCHEME.INGREDIENT
-    local fmts = {
-        AND_PROTOTYPE = '',
-        BUT_PROTOTYPE = '',
-        INGREDIENT = ingredient_str,
-        RECIPE = name,
-    }
-
-    if num > 0 then
-        fmts.NUM = num
-        if prototype ~= "" then
-            fmts.AND_PROTOTYPE = subfmt(GetMapping(qa, 'WORDS', 'AND_PROTOTYPE'), { PROTOTYPE = prototype })
-        end
-        return Announce(subfmt(qa.FORMATS.NEED, fmts))
-    else
-        fmts.NUM = can_make
-        if prototype ~= "" then
-            fmts.BUT_PROTOTYPE = subfmt(GetMapping(qa, 'WORDS', 'BUT_PROTOTYPE'), { PROTOTYPE = prototype })
-        end
-        return Announce(subfmt(qa.FORMATS.HAVE, fmts))
-    end
+    
+    return AnnounceMergedRecipe(
+        recipe, 
+        ingredients.owner.replica.builder, 
+        ingredients.owner.replica.inventory, 
+        ingredients.owner, 
+        specific_ingredient_type
+    )
 end
 
-local ITEM_PREFAB_ALIAS = {
-    -- 鹿角
-    deer_antler1 = "deer_antler",
-    deer_antler2 = "deer_antler",
-    deer_antler3 = "deer_antler",
-    -- 还有啥呢？好难猜呀
-}
-
-local function CountItemALIAS(container, name, prefab)
-    local num_found = 0
-    local items = container:GetItems()
-    for _, v in pairs(items) do
-        if v and ITEM_PREFAB_ALIAS[v.prefab] == prefab and v:GetDisplayName() == name then
-            if v.replica.stackable ~= nil then
-                num_found = num_found + v.replica.stackable:StackSize()
-            else
-                num_found = num_found + 1
-            end
-        end
-    end
-
-    if container.GetActiveItem then
-        local active_item = container:GetActiveItem()
-        if active_item and ITEM_PREFAB_ALIAS[active_item.prefab] == prefab and active_item:GetDisplayName() == name then
-            if active_item.replica.stackable ~= nil then
-                num_found = num_found + active_item.replica.stackable:StackSize()
-            else
-                num_found = num_found + 1
-            end
-        end
-    end
-
-    if container.GetOverflowContainer then
-        local overflow = container:GetOverflowContainer()
-        if overflow ~= nil then
-            local overflow_found = CountItemALIAS(overflow, name, prefab)
-            num_found = num_found + overflow_found
-        end
-    end
-
-    return num_found
+-- [7] 环境实体探测逻辑
+local function GetCleanEntityName(entity, base_prefab_name)
+    return CleanPrefixName(entity:GetDisplayName(), entity.prefab and STRINGS.NAMES[entity.prefab:upper()], base_prefab_name)
 end
 
-local function CountItemWithName(container, name, prefab)
-    local num_found = 0
-    local items = container:GetItems()
-    for _, v in pairs(items) do
-        if v and v.prefab == prefab and v:GetDisplayName() == name then
-            if v.replica.stackable ~= nil then
-                num_found = num_found + v.replica.stackable:StackSize()
-            else
-                num_found = num_found + 1
+TheInput:AddMouseButtonHandler(function(button, down)
+    if not (IsDefaultScreen() and TheInput:IsControlPressed(CONTROL_FORCE_INSPECT) and TheInput:IsKeyDown(KEY_LSHIFT) and down) then 
+        return 
+    end
+    if button ~= MOUSEBUTTON_LEFT then 
+        return 
+    end
+
+    local entity = ConsoleWorldEntityUnderMouse()
+    if not entity then
+        local pos = TheInput:GetWorldPosition()
+        local ents = TheSim:FindEntities(pos.x, pos.y, pos.z, GLOBAL.NOMU_QA.DATA.FUZZY_ANNOUNCE and 4 or 2, nil, { "INLIMBO", "player" })
+        local fuzzy_entity = nil
+        
+        for _, v in ipairs(ents) do
+            if v.prefab == "oasislake" 
+                or v.prefab == "icefishing_hole" 
+                or v.prefab == "oceanwhirlbigportal" 
+                or v.prefab == "willow_ember" 
+                or (v.prefab and string.find(v.prefab, "sinkhole")) 
+                or v:HasTag("underwater_salvageable") 
+                or (v:HasTag("oceanfishable") and v:HasTag("oceanfishinghookable")) then
+                entity = v
+                break
+            end
+            
+            if GLOBAL.NOMU_QA.DATA.FUZZY_ANNOUNCE 
+                and not fuzzy_entity 
+                and v.prefab 
+                and v.name 
+                and not v:HasTag("NOCLICK") 
+                and not v:HasTag("FX") 
+                and not v:HasTag("DECOR") then 
+                fuzzy_entity = v 
             end
         end
-    end
-
-    if container.GetActiveItem then
-        local active_item = container:GetActiveItem()
-        if active_item and active_item.prefab == prefab and active_item:GetDisplayName() == name then
-            if active_item.replica.stackable ~= nil then
-                num_found = num_found + active_item.replica.stackable:StackSize()
-            else
-                num_found = num_found + 1
-            end
+        if not entity and fuzzy_entity then 
+            entity = fuzzy_entity 
         end
     end
 
-    if container.GetOverflowContainer then
-        local overflow = container:GetOverflowContainer()
-        if overflow ~= nil then
-            local overflow_found = CountItemWithName(overflow, name, prefab)
-            num_found = num_found + overflow_found
+    if not entity then return end
+    local qa = GLOBAL.NOMU_QA.SCHEME.ENV
+
+    if not TheInput:IsKeyDown(KEY_LCTRL) and entity:HasTag('player') then
+        if entity == ThePlayer then 
+            return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.I_AM_HERE, { NAME = entity:GetDisplayName() })) 
         end
-    end
-
-    return num_found
-end
-
-local function get_container_name(container)
-    if not container then
-        return
-    end
-    local container_name = container:GetBasicDisplayName()
-    local container_prefab = container and container.prefab
-    local underscore_index = container_prefab and container_prefab:find("_container")
-    if type(container_name) == "string" and container_name:find("^%s*$") and underscore_index then
-        container_name = STRINGS.NAMES[container_prefab:sub(1, underscore_index - 1):upper()]
-    end
-    --print('!!!', container_prefab)
-    return STRINGS.NOMU_QA[container_prefab:upper()] or container_name and container_name:lower()
-end
-
-local RECHARGEABLE_PREFABS = {
-    pocketwatch_heal = TUNING.POCKETWATCH_HEAL_COOLDOWN,
-    pocketwatch_revive = TUNING.POCKETWATCH_REVIVE_COOLDOWN,
-    pocketwatch_warp = TUNING.POCKETWATCH_WARP_COOLDOWN,
-    pocketwatch_recall = TUNING.POCKETWATCH_RECALL_COOLDOWN,
-    pocketwatch_portal = TUNING.POCKETWATCH_RECALL_COOLDOWN,
-}
-
-local SUSPICIOUS_MARBLE = {
-    sculpture_bishophead = STRINGS.NOMU_QA.SCULPTURE_BISHOPHEAD,
-    sculpture_knighthead = STRINGS.NOMU_QA.SCULPTURE_KNIGHTHEAD,
-    sculpture_rooknose = STRINGS.NOMU_QA.SCULPTURE_ROOKNOSE,
-    sculpture_bishopbody = STRINGS.NOMU_QA.SCULPTURE_BISHOPBODY,
-    sculpture_knightbody = STRINGS.NOMU_QA.SCULPTURE_KNIGHTBODY,
-    sculpture_rookbody = STRINGS.NOMU_QA.SCULPTURE_ROOKBODY
-}
-
-local function AnnounceItem(slot, classname)
-    local item = slot.tile.item
-    local container = slot.container
-    local percent
-    local percent_type
-    if slot.tile.percent then
-        percent = slot.tile.percent:GetString()
-        percent_type = "DURABILITY"
-    elseif slot.tile.hasspoilage then
-        percent = math.floor(item.replica.inventoryitem.classified.perish:value() * (1 / .62)) .. "%"
-        percent_type = "FRESHNESS"
-    end
-    if container == nil or (container and container.type == "pack") then
-        container = ThePlayer.replica.inventory
-    end
-    local num_equipped = 0
-    local num_equipped_name = 0
-    if not container.type then
-        for _, _slot in pairs(EQUIPSLOTS) do
-            local equipped_item = container:GetEquippedItem(_slot)
-            if equipped_item and equipped_item.prefab == item.prefab then
-                num_equipped = num_equipped + (equipped_item.replica.stackable and equipped_item.replica.stackable:StackSize() or 1)
-                if equipped_item.name == item.name then
-                    num_equipped_name = num_equipped_name + (equipped_item.replica.stackable and equipped_item.replica.stackable:StackSize() or 1)
-                end
-            end
+        
+        local inventory = ThePlayer.replica.inventory
+        local active_item = inventory and inventory:GetActiveItem()
+        if active_item then 
+            return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.GIVE_ITEM, { 
+                NAME = entity:GetDisplayName(), 
+                NUM = active_item.replica.stackable and active_item.replica.stackable:StackSize() or 1, 
+                ITEM_NAME = string.gsub(active_item:GetDisplayName(), '\n', ' ') 
+            })) 
         end
-    end
-    local container_name = get_container_name(container.type and container.inst)
-    if not container_name then
-        local player = container.inst.entity:GetParent()
-        local constructionbuilder = player and player.components and player.components.constructionbuilder
-        if constructionbuilder and constructionbuilder.constructionsite then
-            container_name = get_container_name(constructionbuilder.constructionsite)
+        
+        local is_me, is_ent = ThePlayer:HasTag("playerghost"), entity:HasTag("playerghost")
+        local player_fmt = GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.DEFAULT
+        
+        if is_me and is_ent then 
+            player_fmt = GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.BOTH_GHOST
+        elseif is_me then 
+            player_fmt = GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.ME_GHOST
+        elseif is_ent then 
+            player_fmt = GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.THEY_GHOST
+        else 
+            player_fmt = GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.GREET or player_fmt 
         end
+        
+        return Announce(subfmt(player_fmt, { NAME = entity:GetDisplayName() }))
     end
+    
+    local px, py, pz = entity:GetPosition():Get()
 
-    local name = item.prefab and STRINGS.NAMES[item.prefab:upper()] or STRINGS.NOMU_QA.UNKNOWN_NAME
-    local _, num_found = container:Has(item.prefab, 1)
-    if ITEM_PREFAB_ALIAS[item.prefab] then -- 将部分物品视为同一个prefab，解决宣告数量不准确的问题
-        num_found = CountItemALIAS(container, item:GetDisplayName(), ITEM_PREFAB_ALIAS[item.prefab])
-    end
-    local num_found_name = ITEM_PREFAB_ALIAS[item.prefab] and CountItemALIAS(container, item:GetDisplayName(), ITEM_PREFAB_ALIAS[item.prefab]) or CountItemWithName(container, item:GetDisplayName(), item.prefab)
-    num_found_name = num_found_name + num_equipped_name
-    num_found = num_found + num_equipped
-    local item_name = string.gsub(item:GetBasicDisplayName(), '\n', ' ')
-    if name == STRINGS.NOMU_QA.UNKNOWN_NAME and num_found == num_found_name then
-        name = item_name
-    end
+    local is_on_water = TheWorld.Map and TheWorld.Map:IsOceanAtPoint(px, py, pz) and (entity.GetCurrentPlatform == nil or entity:GetCurrentPlatform() == nil)
 
-    local qa = GLOBAL.NOMU_QA.SCHEME.ITEM
-    local fmts = {
-        PRONOUN = GetMapping(qa, 'PRONOUN', 'I'),
-        NUM = num_found,
-        EQUIP_NUM = num_equipped,
-        ITEM = name,
-        ITEM_NAME = item_name ~= name and subfmt(GetMapping(qa, 'WORDS', 'ITEM_NAME'), { NUM = num_found_name, NAME = item_name }) or '',
-        IN_CONTAINER = '',
-        WITH_PERCENT = '',
-        POST_STATE = '',
-        SHOW_ME = '',
-        ITEM_NUM = num_equipped ~= num_found and subfmt(GetMapping(qa, 'WORDS', 'ITEM_NUM'), { NUM = num_found }) or '',
-    }
+    local radius = type(GLOBAL.NOMU_QA.DATA.ANNOUNCE_RANGE) == "number" and GLOBAL.NOMU_QA.DATA.ANNOUNCE_RANGE or 40
+    local entities = TheSim:FindEntities(px, py, pz, radius)
+    
+    local count_name, count_prefab, count_burnt, count_fire, count_withered = 0, 0, 0, 0, 0
+    local count_barren, count_smolder, count_charged_goat, count_normal_goat = 0, 0, 0, 0
+    
+    local dist_sq = ThePlayer:GetDistanceSqToInst(entity)
+    local dist_str = ""
 
-    if container_name then
-        fmts.PRONOUN = GetMapping(qa, 'PRONOUN', 'WE')
-        fmts.IN_CONTAINER = subfmt(GetMapping(qa, 'WORDS', 'IN_CONTAINER'), {
-            NAME = container_name
-        })
-    end
+    local show_dist = GLOBAL.NOMU_QA.DATA.SHOW_DISTANCE
+    
+    if show_dist > 0 then
+        local raw_dist = math.sqrt(dist_sq) / 4
+        if raw_dist >= 1 then
+            local dist_val = (show_dist == 2) and string.format("%.1f", raw_dist) or math.floor(raw_dist)
 
-    if percent then
-        local this_one = num_found > 1 and GetMapping(qa, 'WORDS', 'THIS_ONE') or ''
-        fmts.WITH_PERCENT = subfmt(GetMapping(qa, 'WORDS', 'WITH_PERCENT'), {
-            THIS_ONE = this_one,
-            PERCENT = percent,
-            TYPE = GetMapping(qa, 'PERCENT_TYPE', percent_type)
-        })
-    end
-
-    if item.prefab == 'heatrock' then
-        --'heatrock_fantasy', 'heat_rock', 'heatrock_fire'
-        -- hash('heatrock_fantasy3.tex')
-        local temp_range = {
-            [4264163310] = 1, [3706253814] = 1, [2098310090] = 1,
-            [1108760303] = 2, [550850807] = 2, [3237874379] = 2,
-            [2248324592] = 3, [1690415096] = 3, [82471372] = 3,
-            [3387888881] = 4, [2829979385] = 4, [1222035661] = 4,
-            [232485874] = 5, [3969543674] = 5, [2361599950] = 5
-        }
-        local temp_category = { 'COLD', 'COOL', 'NORMAL', 'WARM', 'HOT' }
-        if item.replica and item.replica.inventoryitem and item.replica.inventoryitem.GetImage then
-            local range = temp_range[item.replica.inventoryitem:GetImage()]
-            if range and temp_category[range] then
-                fmts.POST_STATE = GetMapping(qa, 'HEAT_ROCK', temp_category[range])
-            end
-        end
-    end
-
-    if SUSPICIOUS_MARBLE[item.prefab] then
-        fmts.POST_STATE = subfmt(GetMapping(qa, 'WORDS', 'SUSPICIOUS_MARBLE'), { NAME = SUSPICIOUS_MARBLE[item.prefab] })
-    end
-
-    if RECHARGEABLE_PREFABS[item.prefab] and item.replica.inventoryitem.classified then
-        local seconds = (180 - item.replica.inventoryitem.classified.recharge:value()) / 180 * RECHARGEABLE_PREFABS[item.prefab]
-        local minutes = math.modf(seconds / 60)
-        if seconds == 0 then
-            fmts.POST_STATE = GetMapping(qa, 'RECHARGE', 'FULL')
+            local word_key = is_on_water and 'DISTANCE_FAR_WATER' or 'DISTANCE_FAR'
+            local template = GetMapping(qa, 'WORDS', word_key) or GetMapping(qa, 'WORDS', 'DISTANCE_FAR')
+            
+            dist_str = subfmt(template, { DIST = dist_val })
         else
-            seconds = math.modf(math.fmod(seconds, 60))
-            local message = ''
-            if minutes > 0 then
-                message = message .. tostring(minutes) .. GetMapping(qa, 'TIME', 'MINUTES')
-            end
-            message = message .. tostring(seconds) .. GetMapping(qa, 'TIME', 'SECONDS')
-            fmts.POST_STATE = subfmt(GetMapping(qa, 'RECHARGE', 'CHARGING'), { TIME = message })
+            local word_key = is_on_water and 'DISTANCE_CLOSE_WATER' or 'DISTANCE_CLOSE'
+            dist_str = GetMapping(qa, 'WORDS', word_key) or GetMapping(qa, 'WORDS', 'DISTANCE_CLOSE')
         end
     end
 
-    if SHOW_ME_ON and (GLOBAL.NOMU_QA.DATA.SHOW_ME == 1 or GLOBAL.NOMU_QA.DATA.SHOW_ME == 2 and item:HasTag('unwrappable')) then
-        local n_line_name = #(string.split(item:GetDisplayName(), '\n'))
-        local items = GLOBAL.QA_UTILS.ParseHoverText(n_line_name + (classname == 'invslot' and 3 or 2), -1)
-        if #items > 0 then
-            fmts.SHOW_ME = subfmt(GetMapping(qa, 'WORDS', 'SHOW_ME'), { SHOW_ME = table.concat(items, STRINGS.NOMU_QA.COMMA) })
+    local target_burnt = entity:HasTag("burnt")
+    local target_fire = entity:HasTag("fire")
+    local target_withered = entity:HasTag("withered")
+    local target_barren = entity:HasTag("barren")
+    local target_smolder = entity:HasTag("smolder")
+    local is_lightninggoat = entity.prefab == "lightninggoat"
+    local target_is_charged_goat = is_lightninggoat and entity:HasTag("charged")
+
+    local target_is_crop = entity:HasTag("farm_plant") 
+                        or entity:HasTag("beebox") 
+                        or SPECIAL_CROPS[entity.prefab] 
+                        or BASIC_PICKABLES[entity.prefab]
+
+    local target_crop_stat = nil
+    if target_is_crop then
+        if entity:HasTag("farm_plant") then target_crop_stat = GetCropStat(entity.AnimState)
+        elseif entity.prefab == "waterplant" then target_crop_stat = entity:HasTag("harvestable") and "WITH_BARNACLES" or "NO_BARNACLES"
+        elseif entity.prefab == "saltstack" then target_crop_stat = GetSaltStackStat(entity.AnimState)
+        elseif entity.prefab == "marbleshrub" then target_crop_stat = GetMarbleShrubStat(entity.AnimState)
+        elseif entity:HasTag("beebox") then target_crop_stat = GetBeeboxStat(entity.AnimState)
+        elseif entity.prefab == "mushroom_farm" then target_crop_stat = GetMushroomFarmStat(entity.AnimState)
+        elseif entity.prefab == "tallbirdnest" then target_crop_stat = entity:HasTag("pickable") and "NEST_HAS_EGG" or "NEST_EMPTY"
+        elseif entity.prefab == "lureplant" then target_crop_stat = GetLureplantStat(entity.AnimState)
+        elseif BASIC_PICKABLES[entity.prefab] then target_crop_stat = entity:HasTag("pickable") and "PICKABLE_READY" or "PICKABLE_EMPTY"
         end
-    elseif DISPLAY_INFORMATION_ON and (GLOBAL.NOMU_QA.DATA.SHOW_ME == 1 or GLOBAL.NOMU_QA.DATA.SHOW_ME == 2 and item:HasTag('unwrappable')) then
-        local value = ThePlayer and ThePlayer.player_classified and ThePlayer.player_classified.daxsg_display:value() or ""
-        local rs = {}
-        local data = {str = { }}
-        if value ~= "" then
-            data = json.decode(value)
-            for i = 1, 30 do
-                local daxdata = data.str or {}
-                local v = daxdata[i]
-                if v ~= nil then
-                    local dax_str=(v[2] ~= nil and v[1]..": "..v[2] or v[1])
-                    table.insert(rs, dax_str)
+    end
+
+    local target_is_tree = entity:HasTag("tree") 
+                        or entity:HasTag("rock_tree") 
+                        or (entity.prefab and (string.find(entity.prefab, "sapling") 
+                            or entity.prefab == "marbleshrub" 
+                            or string.find(entity.prefab, "marbletree")) 
+                            and not entity:HasTag("player"))
+    local target_tree_stat = target_is_tree and GetTreeStat(entity) or nil
+
+    local target_is_spiderden = (entity:HasTag("spiderden") 
+                              and entity.prefab ~= "moonspiderden" 
+                              and entity.prefab ~= "spiderhole") 
+                              or entity:HasTag("shadowchesspiece")
+    local target_spiderden_stat = target_is_spiderden and GetSpiderDenStat(entity) or nil
+
+    local target_is_hotspring = entity.prefab == "hotspring"
+    local target_hotspring_stat = target_is_hotspring and GetHotspringStat(entity) or nil
+
+    local is_fruitdragon = entity.prefab == "fruitdragon"
+    local target_is_ripe_fruitdragon = is_fruitdragon and (
+        (entity.AnimState and entity.AnimState:GetBuild() == "fruit_dragon_ripe_build") 
+        or string.find(entity:GetDisplayName() or "", "Ripe")
+    )
+
+    local is_archive_switch = entity.prefab == "archive_switch"
+    local target_is_full_archive_switch = is_archive_switch and entity.AnimState and (
+        entity.AnimState:IsCurrentAnimation("idle_full") 
+        or entity.AnimState:IsCurrentAnimation("activate")
+    )
+
+    local count_crop_stat = 0
+    local count_tree_stat = 0
+    local count_spiderden_stat = 0
+    local count_hotspring_stat = 0
+    local count_ripe_fruitdragon = 0
+    local count_unripe_fruitdragon = 0
+    local count_archive_switch_full = 0
+    local count_archive_switch_empty = 0
+    
+    local target_name = ""
+    pcall(function() target_name = entity:GetDisplayName() end)
+
+    local is_shadow_centipede_piece = entity:HasTag("shadowthrall_centipede")
+    local is_worm_boss_piece = entity:HasTag("worm_boss_piece")
+    local centipede_has_piece = false
+    local centipede_head_count = 0
+
+    for _, v in ipairs(entities) do
+        local is_same_entity = false
+        
+        if is_shadow_centipede_piece and v:HasTag("shadowthrall_centipede") then
+            is_same_entity = true
+            centipede_has_piece = true
+            if v.prefab == "shadowthrall_centipede_head" then
+                centipede_head_count = centipede_head_count + 1
+            end
+        elseif is_worm_boss_piece and v:HasTag("worm_boss_piece") then
+            is_same_entity = true
+        elseif ((ITEM_PREFAB_ALIAS[entity.prefab] and ITEM_PREFAB_ALIAS[entity.prefab] == ITEM_PREFAB_ALIAS[v.prefab]) 
+             or v.prefab == entity.prefab) then
+            is_same_entity = true
+        end
+
+        if v.entity:IsVisible() and is_same_entity then
+            local v_name = ""
+            pcall(function() v_name = v:GetDisplayName() end)
+            
+            local s = v.replica and v.replica.stackable and v.replica.stackable:StackSize() or 1
+            count_prefab = count_prefab + s
+            
+            if v_name == target_name then count_name = count_name + s end
+            if target_burnt and v:HasTag("burnt") then count_burnt = count_burnt + 1 end
+            if target_fire and v:HasTag("fire") then count_fire = count_fire + 1 end
+            if target_withered and v:HasTag("withered") then count_withered = count_withered + 1 end
+            if target_barren and v:HasTag("barren") then count_barren = count_barren + 1 end
+            if target_smolder and v:HasTag("smolder") then count_smolder = count_smolder + 1 end
+
+            if is_lightninggoat and v.prefab == "lightninggoat" then
+                if v:HasTag("charged") then
+                    count_charged_goat = count_charged_goat + 1
+                else
+                    count_normal_goat = count_normal_goat + 1
                 end
             end
-            fmts.SHOW_ME = subfmt(GetMapping(qa, 'WORDS', 'SHOW_ME'), { SHOW_ME = table.concat(rs, STRINGS.NOMU_QA.COMMA) })
+
+            if target_is_crop and target_crop_stat then
+                local v_crop_stat = nil
+                if v:HasTag("farm_plant") then v_crop_stat = GetCropStat(v.AnimState)
+                elseif v.prefab == "waterplant" then v_crop_stat = v:HasTag("harvestable") and "WITH_BARNACLES" or "NO_BARNACLES"
+                elseif v.prefab == "saltstack" then v_crop_stat = GetSaltStackStat(v.AnimState)
+                elseif v.prefab == "marbleshrub" then v_crop_stat = GetMarbleShrubStat(v.AnimState)
+                elseif v:HasTag("beebox") then v_crop_stat = GetBeeboxStat(v.AnimState)
+                elseif v.prefab == "mushroom_farm" then v_crop_stat = GetMushroomFarmStat(v.AnimState)
+                elseif v.prefab == "tallbirdnest" then v_crop_stat = v:HasTag("pickable") and "NEST_HAS_EGG" or "NEST_EMPTY"
+                elseif v.prefab == "lureplant" then v_crop_stat = GetLureplantStat(v.AnimState)
+                elseif BASIC_PICKABLES[v.prefab] then v_crop_stat = v:HasTag("pickable") and "PICKABLE_READY" or "PICKABLE_EMPTY"
+                end
+                
+                if target_crop_stat == v_crop_stat then 
+                    count_crop_stat = count_crop_stat + 1 
+                end
+            end
+            
+            if target_is_tree and target_tree_stat and target_tree_stat == GetTreeStat(v) then 
+                count_tree_stat = count_tree_stat + 1 
+            end
+
+            if target_is_spiderden and target_spiderden_stat and target_spiderden_stat == GetSpiderDenStat(v) then
+                count_spiderden_stat = count_spiderden_stat + 1
+            end
+
+            if target_is_hotspring and target_hotspring_stat and v.prefab == "hotspring" then
+                if target_hotspring_stat == GetHotspringStat(v) then
+                    count_hotspring_stat = count_hotspring_stat + 1
+                end
+            end
+
+            if is_fruitdragon and v.prefab == "fruitdragon" then
+                if (v.AnimState and v.AnimState:GetBuild() == "fruit_dragon_ripe_build") 
+                    or string.find(v:GetDisplayName() or "", "Ripe") then
+                    count_ripe_fruitdragon = count_ripe_fruitdragon + 1
+                else
+                    count_unripe_fruitdragon = count_unripe_fruitdragon + 1
+                end
+            end
+
+            if is_archive_switch and v.prefab == "archive_switch" then
+                if v.AnimState and (v.AnimState:IsCurrentAnimation("idle_full") or v.AnimState:IsCurrentAnimation("activate")) then
+                    count_archive_switch_full = count_archive_switch_full + 1
+                else
+                    count_archive_switch_empty = count_archive_switch_empty + 1
+                end
+            end
         end
     end
 
-    return Announce(subfmt(classname == 'invslot' and qa.FORMATS.INV_SLOT or qa.FORMATS.EQUIP_SLOT, fmts))
-end
+    if is_worm_boss_piece then
+        local boss_count = 0
+        for _, v in pairs(GLOBAL.Ents) do
+            if v.prefab == "worm_boss" then
+                if v:GetDistanceSqToInst(entity) <= 10000 then
+                    boss_count = boss_count + 1
+                end
+            end
+        end
+        if boss_count == 0 then boss_count = 1 end 
+        count_prefab = boss_count
+        count_name = boss_count
+    elseif is_shadow_centipede_piece then
+        local boss_count = math.ceil(centipede_head_count / 2)
+        if boss_count == 0 and centipede_has_piece then boss_count = 1 end
+        count_prefab = boss_count
+        count_name = boss_count
+    end
 
+    local prefab_name = entity.prefab and (STRINGS.NOMU_QA[entity.prefab:upper()] or STRINGS.NAMES[entity.prefab:upper()])
+    prefab_name = ApplyCustomName(entity.prefab, prefab_name)
+    
+    local display_name = ""
+    pcall(function() 
+        display_name = string.gsub(GLOBAL.NOMU_QA.DATA.SHOW_PREFIX and entity:GetDisplayName() or entity:GetBasicDisplayName(), '\n', ' ') 
+    end)
+    
+    if display_name == "" then 
+        display_name = prefab_name or "MISSING NAME" 
+    end
+    
+    if entity.prefab and string.find(entity.prefab, "sinkhole") then 
+        prefab_name = GLOBAL.STRINGS.NOMU_QA[entity.prefab:upper()] 
+                   or (display_name ~= entity.prefab and not string.find(display_name, "MISSING") and display_name or GLOBAL.STRINGS.NOMU_QA.SINKHOLE) 
+    end
+
+    local debug_str = string.format("[实体代码: %s]", tostring(entity.prefab))
+    
+    local start_line = #(string.split(entity:GetDisplayName(), '\n')) + 1
+    local show_me = GetShowMeString(entity, qa, start_line, nil, nil, 2)
+
+    local final_name = GetCleanEntityName(entity, prefab_name)
+    local is_blueprint_type = false  
+    if entity.prefab and (
+        string.find(entity.prefab, "certificate") 
+        or string.find(entity.prefab, "blueprint") 
+        or string.find(entity.prefab, "sketch") 
+        or entity.prefab == "cookingrecipecard"
+    ) and display_name ~= prefab_name then
+        final_name = display_name
+        is_blueprint_type = true 
+    end
+
+    -- 针对不同特殊实体的不同宣告
+    if entity.prefab == "icefishing_hole" then 
+        return Announce(subfmt(qa.FORMATS.FISH_HOLE or qa.FORMATS.SINGLE, { 
+            NAME = GLOBAL.STRINGS.NOMU_QA.ICEFISHING_HOLE, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if entity.prefab == "townportal" then 
+        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PORTAL.FORMATS[entity.AnimState and entity.AnimState:IsCurrentAnimation("idle_on_loop") and "ON" or "OFF"], { 
+            NAME = display_name 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if entity:HasTag("oceanfishable") and entity:HasTag("oceanfishinghookable") and not string.find(entity.prefab or "", "flotsam") then
+        local adj = GLOBAL.STRINGS.UI.CUSTOMIZATIONSCREEN.OCEAN_SHOAL or GLOBAL.STRINGS.NOMU_QA.OCEAN_SHOAL
+        local shoal_name, fish_name = adj, "鱼"
+        
+        if entity.name and type(entity.name) == "string" and entity.name ~= "" and entity.name ~= adj then
+            fish_name = GLOBAL.STRINGS.NOMU_QA[string.upper(entity.name)] or GLOBAL.STRINGS.NAMES[string.upper(entity.name)] or entity.name
+            shoal_name = GLOBAL.STRINGS.UI.OBJECTOWNERSHIP and subfmt(GLOBAL.STRINGS.UI.OBJECTOWNERSHIP, {owner = fish_name, object = adj}) or shoal_name
+        end
+        
+        local f_c = 0
+        for _, v in ipairs(entities) do 
+            if (v:HasTag("oceanfish") or v:HasTag("oceanfishable")) and v.prefab == entity.prefab then 
+                f_c = f_c + 1 
+            end 
+        end
+        return Announce(subfmt(qa.FORMATS.FISH_SHOAL, { 
+            NAME = shoal_name, 
+            NUM = f_c, 
+            FISH = fish_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str)
+    end
+
+    local use_special = GLOBAL.NOMU_QA.DATA.ENABLE_SPECIAL_STATE
+
+    -- 鸟笼特殊宣告判定
+    if use_special and entity.prefab == "birdcage" then 
+        local anim = entity.AnimState
+        local state_fmt = qa.FORMATS.BIRDCAGE_FULL 
+        
+        if anim then
+            if anim:IsCurrentAnimation("idle_empty") then
+                state_fmt = qa.FORMATS.BIRDCAGE_EMPTY
+            elseif CheckAnims(anim, {"idle_sick", "idle_sick2", "idle_sick3", "fall_sick"}) then
+                state_fmt = qa.FORMATS.BIRDCAGE_SICK
+            elseif CheckAnims(anim, {"death", "idle_death", "idle_skeleton"}) then
+                state_fmt = qa.FORMATS.BIRDCAGE_DEAD
+            end
+        end
+
+        return Announce(subfmt(state_fmt or qa.FORMATS.SINGLE, { 
+            TOTAL = count_prefab,
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+
+    -- 绿洲湖泊特殊宣告
+    if use_special and entity.prefab == "oasislake" then
+        local state_fmt = entity:HasTag("NOCLICK") and qa.FORMATS.OASISLAKE_EMPTY or qa.FORMATS.OASISLAKE_FULL
+        return Announce(subfmt(state_fmt, { 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+
+    -- 蟾蜍洞特殊宣告
+    if use_special and entity.prefab == "toadstool_cap" then
+        local state_fmt = qa.FORMATS.TOADSTOOL_EMPTY
+        if entity._state and entity._state:value() > 0 then
+            if entity._dark and entity._dark:value() then
+                state_fmt = qa.FORMATS.TOADSTOOL_DARK
+            else
+                state_fmt = qa.FORMATS.TOADSTOOL_NORMAL
+            end
+        end
+
+        return Announce(subfmt(state_fmt or qa.FORMATS.SINGLE, { 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+
+    if use_special and entity:HasTag("fire") and not entity:HasTag("campfire") and not entity:HasTag("tree") then 
+        local is_equal = (count_fire == count_prefab)
+        return Announce(subfmt(is_equal and qa.FORMATS.FIRE_EQUAL or qa.FORMATS.FIRE_DESCRIBE, { 
+            TOTAL = count_prefab, 
+            NUM = count_fire, 
+            NAME = (entity.prefab == "houndfire" and prefab_name) or display_name or GLOBAL.STRINGS.NOMU_QA.HOUNDFIRE, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and count_burnt > 0 then 
+        local is_equal = (count_burnt == count_prefab)
+        return Announce(subfmt(is_equal and qa.FORMATS.BURNT_EQUAL or qa.FORMATS.BURNT_DESCRIBE, { 
+            TOTAL = count_prefab, 
+            NUM = count_burnt, 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and target_smolder then 
+        local is_equal = (count_smolder == count_prefab)
+        return Announce(subfmt(is_equal and qa.FORMATS.SMOLDER_EQUAL or qa.FORMATS.SMOLDER_DESCRIBE, { 
+            TOTAL = count_prefab, 
+            NUM = count_smolder, 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and is_lightninggoat and target_is_charged_goat then
+        local is_equal = (count_charged_goat == count_prefab)
+        local fmt = is_equal and qa.FORMATS.GOAT_CHARGED_EQUAL or qa.FORMATS.GOAT_CHARGED_DESCRIBE
+        return Announce(subfmt(fmt, { 
+            TOTAL = count_prefab, 
+            NUM = count_charged_goat, 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str)
+    end
+    
+    if use_special and entity:HasTag("withered") then 
+        local is_equal = (count_withered == count_prefab)
+        return Announce(subfmt(is_equal and qa.FORMATS.WITHERED_EQUAL or qa.FORMATS.WITHERED_DESCRIBE, { 
+            TOTAL = count_prefab, 
+            NUM = count_withered, 
+            NAME = prefab_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and target_barren then 
+        local is_equal = (count_barren == count_prefab)
+        return Announce(subfmt(is_equal and qa.FORMATS.BARREN_EQUAL or qa.FORMATS.BARREN_DESCRIBE, { 
+            TOTAL = count_prefab, 
+            NUM = count_barren, 
+            NAME = prefab_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and target_is_crop and target_crop_stat then 
+        return Announce(subfmt(count_crop_stat == count_prefab and GLOBAL.NOMU_QA.SCHEME.CROP.FORMATS.EQUAL or GLOBAL.NOMU_QA.SCHEME.CROP.FORMATS.DESCRIBE, { 
+            COUNT = count_prefab, 
+            NUM = count_crop_stat, 
+            NAME = final_name or display_name, 
+            ADJ = GetMapping(GLOBAL.NOMU_QA.SCHEME.CROP, 'ADJ', target_crop_stat), 
+            SHOW_ME = dist_str .. show_me 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and target_is_tree and target_tree_stat then 
+        return Announce(subfmt(count_tree_stat == count_prefab and GLOBAL.NOMU_QA.SCHEME.TREE.FORMATS.EQUAL or GLOBAL.NOMU_QA.SCHEME.TREE.FORMATS.DESCRIBE, { 
+            COUNT = count_prefab, 
+            NUM = count_tree_stat, 
+            NAME = final_name or display_name, 
+            ADJ = GetMapping(GLOBAL.NOMU_QA.SCHEME.TREE, 'ADJ', target_tree_stat), 
+            SHOW_ME = dist_str .. show_me 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and target_is_spiderden and target_spiderden_stat then
+        return Announce(subfmt(count_spiderden_stat == count_prefab and GLOBAL.NOMU_QA.SCHEME.SPIDERDEN.FORMATS.EQUAL or GLOBAL.NOMU_QA.SCHEME.SPIDERDEN.FORMATS.DESCRIBE, { 
+            COUNT = count_prefab, 
+            NUM = count_spiderden_stat, 
+            NAME = final_name or display_name, 
+            ADJ = GetMapping(GLOBAL.NOMU_QA.SCHEME.SPIDERDEN, 'ADJ', target_spiderden_stat), 
+            SHOW_ME = dist_str .. show_me 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and target_is_hotspring and target_hotspring_stat then
+        local is_equal = (count_hotspring_stat == count_prefab)
+        local fmt_key = "HOTSPRING_" .. target_hotspring_stat .. (is_equal and "_EQUAL" or "_DESCRIBE")
+        return Announce(subfmt(qa.FORMATS[fmt_key], { 
+            TOTAL = count_prefab, 
+            NUM = count_hotspring_stat, 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    if use_special and is_fruitdragon and target_is_ripe_fruitdragon then
+        local is_equal = (count_ripe_fruitdragon == count_prefab)
+        local fmt_key = "FRUITDRAGON_RIPE" .. (is_equal and "_EQUAL" or "_DESCRIBE")
+        
+        return Announce(subfmt(qa.FORMATS[fmt_key], { 
+            TOTAL = count_prefab, 
+            NUM = count_ripe_fruitdragon, 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str)
+    end
+
+    if use_special and is_archive_switch then
+        local is_equal = (target_is_full_archive_switch and count_archive_switch_full == count_prefab) 
+                      or (not target_is_full_archive_switch and count_archive_switch_empty == count_prefab)
+        local fmt_key = (target_is_full_archive_switch and "ARCHIVE_SWITCH_FULL" or "ARCHIVE_SWITCH_EMPTY") .. (is_equal and "_EQUAL" or "_DESCRIBE")
+        local num = target_is_full_archive_switch and count_archive_switch_full or count_archive_switch_empty
+        
+        return Announce(subfmt(qa.FORMATS[fmt_key], { 
+            TOTAL = count_prefab, 
+            NUM = num, 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str)
+    end
+
+    local final_count = is_blueprint_type and count_name or (final_name and count_prefab or count_name)
+
+    local basic_name = ""
+    pcall(function() basic_name = entity:GetBasicDisplayName() end)
+    local default_name = entity.prefab and GLOBAL.STRINGS.NAMES[entity.prefab:upper()] or ""
+
+    local is_qa_item = entity.prefab and STRINGS.NOMU_QA[entity.prefab:upper()] ~= nil
+
+    local is_custom_named = false
+    if not is_qa_item then
+        is_custom_named = basic_name ~= "" 
+                         and prefab_name ~= nil 
+                         and basic_name ~= default_name 
+                         and basic_name ~= prefab_name 
+                         and not is_blueprint_type
+    end
+    
+    if is_custom_named and qa.FORMATS.NAMED then
+        return Announce(subfmt(qa.FORMATS.NAMED, { 
+            NUM_PREFAB = count_prefab, 
+            PREFAB_NAME = prefab_name or GLOBAL.STRINGS.NOMU_QA.UNKNOWN_NAME, 
+            NUM = count_name, 
+            NAME = display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+
+    if final_count <= 1 then 
+        return Announce(subfmt(qa.FORMATS.SINGLE, { 
+            NAME = final_name or display_name, 
+            SHOW_ME = show_me, 
+            DISTANCE = dist_str 
+        }), entity:HasTag('player'), debug_str) 
+    end
+    
+    return Announce(subfmt(qa.FORMATS.DEFAULT, { 
+        NUM = final_count, 
+        NAME = final_name or display_name, 
+        SHOW_ME = show_me, 
+        DISTANCE = dist_str 
+    }), entity:HasTag('player'), debug_str)
+end)
+
+
+-- [8] 界面 UI 组件与窗口定义
+GLOBAL.NOMU_QA.DeepCopy = DeepCopy
+GLOBAL.NOMU_QA.Announce = Announce
+GLOBAL.NOMU_QA.VERSION = VERSION
+modimport('scripts/qa_config/qa_panel.lua')
+
+
+-- [9] 游戏内系统钩子与事件注入 
+AddSimPostInit(function()
+    GLOBAL.NOMU_QA.LoadData()
+    local BUILTIN_SCHEMES = {
+        { name = STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME, source = GLOBAL.STRINGS.DEFAULT_NOMU_QA },
+        { name = STRINGS.NOMU_QA.TITLE_TEXT_CAT_SCHEME, source = GLOBAL.STRINGS.CAT_NOMU_QA },
+        { name = STRINGS.NOMU_QA.TITLE_TEXT_TSUNDERE_SCHEME, source = GLOBAL.STRINGS.TSUNDERE_NOMU_QA },
+        { name = STRINGS.NOMU_QA.TITLE_TEXT_CUTE_SCHEME, source = GLOBAL.STRINGS.CUTE_NOMU_QA }
+    }
+    
+    local schemes = GLOBAL.NOMU_QA.DATA.SCHEMES
+    for i, template in ipairs(BUILTIN_SCHEMES) do
+        if not schemes[i] or schemes[i].name ~= template.name then
+            local new_scheme = { name = template.name, data = DeepCopy(template.source), version = VERSION }
+            if not schemes[i] then 
+                schemes[i] = new_scheme 
+            else 
+                table.insert(schemes, i, new_scheme) 
+            end
+        else
+            schemes[i].data = DeepCopy(template.source)
+            schemes[i].name = template.name
+        end
+    end
+    
+    local current = GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME
+    if current then
+        for _, template in ipairs(BUILTIN_SCHEMES) do
+            if current.name == template.name then 
+                current.data = DeepCopy(template.source)
+                break 
+            end
+        end
+        GLOBAL.NOMU_QA.ApplyScheme(current)
+    end
+end)
+
+-- 拦截 HUD 鼠标点击事件
 AddClassPostConstruct('screens/playerhud', function(PlayerHud)
     local oldOnMouseButton = PlayerHud.OnMouseButton
     function PlayerHud:OnMouseButton(button, down, ...)
         if button == MOUSEBUTTON_LEFT and down and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            if OnHUDMouseButton(self) then
-                return true
+            if OnHUDMouseButton(self) then 
+                return true 
             end
         end
         return oldOnMouseButton(self, button, down, ...)
     end
 
-    PlayerHud._StatusAnnouncer = {
-        stat_names = {
-            IA_BOAT = '船'
-        },
-        char_messages = { },
-        Announce = function(_, message)
-            return Announce(message)
-        end,
-        AnnounceItem = function(_, slot)
-            return AnnounceItem(slot,'invslot')
-        end
+    PlayerHud._StatusAnnouncer = { 
+        stat_names = { IA_BOAT = '船' }, 
+        char_messages = { }, 
+        Announce = function(_, message) return Announce(message) end,
+        AnnounceItem = function(_, slot) return AnnounceItem(slot, 'invslot') end 
     }
-    setmetatable(PlayerHud._StatusAnnouncer.char_messages, {
-        __index = function(_, k)
-            return STRINGS._STATUS_ANNOUNCEMENTS.UNKNOWN[k]
-        end
+    
+    setmetatable(PlayerHud._StatusAnnouncer.char_messages, { 
+        __index = function(_, k) return STRINGS._STATUS_ANNOUNCEMENTS.UNKNOWN[k] end 
     })
 
     local oldOnUpdate = PlayerHud.OnUpdate
-    local Text = require "widgets/text"
     function PlayerHud:OnUpdate(...)
         if self.controls and self.controls.foodcrafting and self.controls.foodcrafting.allfoods then
             for _, food_item in ipairs(self.controls.foodcrafting.allfoods) do
                 if food_item.recipepopup then
-                    if food_item.recipepopup.hunger and not food_item.recipepopup.hunger.hovertext then
-                        food_item.recipepopup.hunger:SetString('-')
-                        food_item.recipepopup.hunger:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
-                    end
-                    if food_item.recipepopup.health and not food_item.recipepopup.health.hovertext then
-                        food_item.recipepopup.health:SetString('-')
-                        food_item.recipepopup.health:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
-                    end
-                    if food_item.recipepopup.sanity and not food_item.recipepopup.sanity.hovertext then
-                        food_item.recipepopup.sanity:SetString('-')
-                        food_item.recipepopup.sanity:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
-                    end
-                    if food_item.recipepopup.name and not food_item.recipepopup.name.hovertext then
-                        food_item.recipepopup.name:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
+                    for _, k in ipairs({"hunger", "health", "sanity", "name"}) do
+                        if food_item.recipepopup[k] and not food_item.recipepopup[k].hovertext then
+                            if k ~= "name" then 
+                                food_item.recipepopup[k]:SetString('-') 
+                            end
+                            food_item.recipepopup[k]:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
+                        end
                     end
                 end
             end
@@ -1204,14 +2443,15 @@ AddClassPostConstruct('screens/playerhud', function(PlayerHud)
     end
 end)
 
+
+-- 拦截各种制作栏和槽位的按键
 AddClassPostConstruct('widgets/redux/craftingmenu_pinslot', function(PinSlot)
     local oldOnControl = PinSlot.OnControl
     function PinSlot:OnControl(control, down, ...)
-        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return AnnounceRecipePinSlot(self)
-        elseif not TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return oldOnControl(self, control, down, ...)
+        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then 
+            return AnnounceRecipePinSlot(self) 
         end
+        return oldOnControl(self, control, down, ...)
     end
 end)
 
@@ -1219,33 +2459,30 @@ AddClassPostConstruct('widgets/redux/craftingmenu_widget', function(CMWidget)
     local grid = CMWidget.recipe_grid
     local oldOnControl = grid.OnControl
     function grid:OnControl(control, down, ...)
-        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return AnnounceRecipeGrid(self, CMWidget.owner)
-        elseif not TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return oldOnControl(self, control, down, ...)
+        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then 
+            return AnnounceRecipeGrid(self, CMWidget.owner) 
         end
+        return oldOnControl(self, control, down, ...)
     end
 end)
 
 AddClassPostConstruct('widgets/redux/craftingmenu_ingredients', function(CMIngredients)
     local oldOnControl = CMIngredients.OnControl
     function CMIngredients:OnControl(control, down, ...)
-        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return AnnounceRecipeCMIngredients(self)
-        elseif not TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return oldOnControl(self, control, down, ...)
+        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then 
+            return AnnounceRecipeCMIngredients(self) 
         end
+        return oldOnControl(self, control, down, ...)
     end
 end)
 
 AddClassPostConstruct('widgets/redux/craftingmenu_skinselector', function(CMSkinSelector)
     local oldOnControl = CMSkinSelector.OnControl
     function CMSkinSelector:OnControl(control, down, ...)
-        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return AnnounceSkin(self)
-        elseif not TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            return oldOnControl(self, control, down, ...)
+        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then 
+            return AnnounceSkin(self) 
         end
+        return oldOnControl(self, control, down, ...)
     end
 end)
 
@@ -1253,172 +2490,86 @@ for _, classname in pairs({ 'invslot', 'equipslot' }) do
     AddClassPostConstruct('widgets/' .. classname, function(SlotClass)
         local oldOnControl = SlotClass.OnControl
         function SlotClass:OnControl(control, down, ...)
-            if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) and TheInput:IsKeyDown(GLOBAL.KEY_LSHIFT) and self.tile then
-                return AnnounceItem(self, classname)
-            else
-                return oldOnControl(self, control, down, ...)
+            if down and control == GLOBAL.CONTROL_ACCEPT 
+                and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) 
+                and TheInput:IsKeyDown(GLOBAL.KEY_LSHIFT) then
+                
+                local container = self.container
+                if container and container.inst and (
+                    container.inst.prefab == "construction_container" 
+                    or container.inst.prefab == "construction_container_1x1" 
+                    or container.inst:HasTag("offerconstructionsite") 
+                    or container.inst.prefab == "enable_shadow_rift_construction_container"
+                ) then
+                    local site = GLOBAL.ThePlayer 
+                              and GLOBAL.ThePlayer.components.constructionbuilderuidata 
+                              and GLOBAL.ThePlayer.components.constructionbuilderuidata:GetTarget() 
+                              or GLOBAL.TheSim:FindEntities(container.inst.Transform:GetWorldPosition(), 4, { "constructionsite" })[1]
+                    
+                    if site and AnnounceConstructionSite(site, container, self.num) then 
+                        return true 
+                    end
+                elseif self.tile and self.tile.item then 
+                    return AnnounceItem(self, classname)
+                elseif classname == 'equipslot' then
+                    local slot_pos_name = GetEquipSlotName(GLOBAL.NOMU_QA.SCHEME.ITEM, self.equipslot)
+                    if slot_pos_name then 
+                        return Announce(
+                            subfmt(GLOBAL.NOMU_QA.SCHEME.ITEM.FORMATS.EQUIP_SLOT_EMPTY, { 
+                                PRONOUN = GetMapping(GLOBAL.NOMU_QA.SCHEME.ITEM, 'PRONOUN', 'I'), 
+                                SLOT_POS = slot_pos_name, 
+                                v = slot_pos_name 
+                            }), 
+                            nil, 
+                            GLOBAL.NOMU_QA.DATA.DEBUG_MODE and string.format("[槽位代码: %s]", tostring(self.equipslot)) or nil
+                        ) 
+                    end
+                elseif container and container.GetNumSlots and container.GetItems then
+                    local used_slots = 0
+                    for _ in pairs(container:GetItems()) do 
+                        used_slots = used_slots + 1 
+                    end
+                    local inst = container.inst
+                    local cont_type = inst == GLOBAL.ThePlayer and "PLAYER" or (inst and inst:HasTag("inlimbo") and "INV" or "CONTAINER")
+                    
+                    return Announce(
+                        subfmt(GLOBAL.NOMU_QA.SCHEME.SPACE.FORMATS[cont_type], { 
+                            COUNT = container:GetNumSlots() - used_slots, 
+                            CONTAINER_NAME = get_container_name(inst) 
+                        }), 
+                        nil, 
+                        GLOBAL.NOMU_QA.DATA.DEBUG_MODE and string.format("[容器代码: %s]", tostring(inst and (inst == GLOBAL.ThePlayer and "inventory" or inst.prefab) or container.type or "inventory")) or nil
+                    )
+                end
             end
+            return oldOnControl(self, control, down, ...)
         end
     end)
 end
 
--- 礼物
 AddClassPostConstruct('widgets/giftitemtoast', function(self)
     local oldOnMouseButton = self.OnMouseButton
     function self:OnMouseButton(button, down, ...)
         local ret = oldOnMouseButton(self, button, down, ...)
-        if button == MOUSEBUTTON_LEFT and down and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            Announce(self.enabled and GLOBAL.NOMU_QA.SCHEME.GIFT.FORMATS.CAN_OPEN or GLOBAL.NOMU_QA.SCHEME.GIFT.FORMATS.NEED_SCIENCE)
+        if button == MOUSEBUTTON_LEFT and down and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then 
+            Announce(self.enabled and GLOBAL.NOMU_QA.SCHEME.GIFT.FORMATS.CAN_OPEN or GLOBAL.NOMU_QA.SCHEME.GIFT.FORMATS.NEED_SCIENCE) 
         end
         return ret
     end
 end)
 
--- Alt+Shift+鼠标左键宣告周围物品
-AddComponentPostInit("playercontroller", function(self, inst)
-    if inst ~= GLOBAL.ThePlayer then return end
-    local PlayerControllerOnControl = self.OnControl
-    self.OnControl = function(self, control, down, ...)
-
-        if not (IsDefaultScreen() and TheInput:IsControlPressed(CONTROL_FORCE_INSPECT) and TheInput:IsKeyDown(KEY_LSHIFT) and down) then
-            return PlayerControllerOnControl(self, control, down, ...)
-        end
-
-        local entity = ConsoleWorldEntityUnderMouse()
-        local qa = GLOBAL.NOMU_QA.SCHEME.ENV
-        if control == GLOBAL.CONTROL_PRIMARY then -- 鼠标左键点击
-            if entity then
-                if not TheInput:IsKeyDown(KEY_LCTRL) and entity:HasTag('player') then
-                    Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.DEFAULT, { NAME = entity:GetDisplayName() }))
-                    return
-                end
-                local px, py, pz = entity:GetPosition():Get()
-                local entities = TheSim:FindEntities(px, py, pz, 40)
-                local count_name = 0
-                local count_prefab = 0
-                for _, v in ipairs(entities) do
-                    if v.entity:IsVisible() and ITEM_PREFAB_ALIAS[entity.prefab] and ITEM_PREFAB_ALIAS[entity.prefab] == ITEM_PREFAB_ALIAS[v.prefab] then
-                        if v.replica and v.replica.stackable ~= nil then
-                            count_prefab = count_prefab + v.replica.stackable:StackSize()
-                            if v:GetDisplayName() == entity:GetDisplayName() then
-                                count_name = count_name + v.replica.stackable:StackSize()
-                            end
-                        else
-                            count_prefab = count_prefab + 1
-                            if v:GetDisplayName() == entity:GetDisplayName() then
-                                count_name = count_name + 1
-                            end
-                        end
-                    elseif v.entity:IsVisible() and v.prefab == entity.prefab then
-                        if v.replica and v.replica.stackable ~= nil then
-                            count_prefab = count_prefab + v.replica.stackable:StackSize()
-                            if v:GetDisplayName() == entity:GetDisplayName() then
-                                count_name = count_name + v.replica.stackable:StackSize()
-                            end
-                        else
-                            count_prefab = count_prefab + 1
-                            if v:GetDisplayName() == entity:GetDisplayName() then
-                                count_name = count_name + 1
-                            end
-                        end
-                    end
-                end
-                local prefab_name = entity.prefab and STRINGS.NAMES[entity.prefab:upper()]
-                local no_whisper = entity:HasTag('player')
-                local display_name = string.gsub(entity:GetDisplayName(), '\n', ' ')
-                if SUSPICIOUS_MARBLE[entity.prefab] then
-                    prefab_name = prefab_name .. ' ' .. SUSPICIOUS_MARBLE[entity.prefab]
-                    display_name = prefab_name
-                end
-
-                local show_me = ''
-                if SHOW_ME_ON and (GLOBAL.NOMU_QA.DATA.SHOW_ME == 1 or GLOBAL.NOMU_QA.DATA.SHOW_ME == 2 and entity:HasTag('unwrappable')) then
-                    local n_line_name = #(string.split(entity:GetDisplayName(), '\n'))
-                    local items = GLOBAL.QA_UTILS.ParseHoverText(n_line_name + 1, nil, nil, 2)
-                    if #items > 0 then
-                        show_me = subfmt(GetMapping(qa, 'WORDS', 'SHOW_ME'), { SHOW_ME = table.concat(items, STRINGS.NOMU_QA.COMMA) })
-                    end
-                elseif DISPLAY_INFORMATION_ON and (GLOBAL.NOMU_QA.DATA.SHOW_ME == 1 or GLOBAL.NOMU_QA.DATA.SHOW_ME == 2 and entity:HasTag('unwrappable')) then
-                    local value = ThePlayer and ThePlayer.player_classified and ThePlayer.player_classified.daxsg_display:value() or ""
-                    local rs = {}
-                    local data = {str = { }}
-                    if value ~= "" then
-                        data = json.decode(value)
-                        for i = 1, 30 do
-                            local daxdata = data.str or {}
-                            local v = daxdata[i]
-                            if v ~= nil then
-                                local dax_str=(v[2] ~= nil and v[1]..": "..v[2] or v[1])
-                                table.insert(rs, dax_str)
-                            end
-                        end
-                        show_me = subfmt(GetMapping(qa, 'WORDS', 'SHOW_ME'), { SHOW_ME = table.concat(rs, STRINGS.NOMU_QA.COMMA) })
-                    end
-                end
-
-                if not prefab_name then
-                    if count_name == 1 then
-                        Announce(subfmt(qa.FORMATS.SINGLE, { NAME = display_name, SHOW_ME = show_me }), no_whisper)
-                        return
-                    else
-                        Announce(subfmt(qa.FORMATS.DEFAULT, { NUM = count_name, NAME = display_name, SHOW_ME = show_me }), no_whisper)
-                        return
-                    end
-                else
-                    if prefab_name ~= display_name then
-                        Announce(subfmt(qa.FORMATS.NAMED, { NUM_PREFAB = count_prefab, PREFAB_NAME = prefab_name, NUM = count_name, NAME = display_name, SHOW_ME = show_me }), no_whisper)
-                        return
-                    else
-                        Announce(subfmt(qa.FORMATS.DEFAULT, { NUM = count_prefab, NAME = prefab_name, SHOW_ME = show_me }), no_whisper)
-                        return
-                    end
-                end
-            end
-        end
-        return PlayerControllerOnControl(self, control, down, ...)
-    end
-end)
-
--- Alt+Shift+鼠标中键宣告
-TheInput:AddMouseButtonHandler(function(button, down)
-    if not (IsDefaultScreen() and TheInput:IsControlPressed(CONTROL_FORCE_INSPECT) and TheInput:IsKeyDown(KEY_LSHIFT) and down) then
-        return
-    end
-
-    local entity = ConsoleWorldEntityUnderMouse()
-    local qa = GLOBAL.NOMU_QA.SCHEME.ENV
-    if button == MOUSEBUTTON_MIDDLE then -- 鼠标中键点击，上面的方法只能识别到鼠标左右键
-        if entity then
-            if not TheInput:IsKeyDown(KEY_LCTRL) and entity:HasTag('player') then
-                if entity == ThePlayer then
-                    Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.PING, { PING = TheNet:GetAveragePing() }))
-                else
-                    Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.GREET, { NAME = entity:GetDisplayName() }))
-                end
-                return
-            end
-            ThePlayer.components.talker:Say(subfmt(qa.FORMATS.CODE, { PREFAB = entity.prefab, NAME = entity:GetDisplayName() }), 5)
-        end
-    end
-end)
-
--- TAB面板
 AddClassPostConstruct('screens/playerstatusscreen', function(PlayerStatusScreen)
     local oldOnUpdate = PlayerStatusScreen.OnUpdate
     function PlayerStatusScreen:OnUpdate(...)
-        if self.servertitle and not self.servertitle.hovertext then
-            self.servertitle:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
+        for _, v in ipairs({self.servertitle, self.serverstate, self.players_number}) do 
+            if v and not v.hovertext then 
+                v:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE) 
+            end 
         end
-        if self.serverstate and not self.serverstate.hovertext then
-            self.serverstate:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
-        end
-        if self.players_number and not self.players_number.hovertext then
-            self.players_number:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
-        end
-        for _, widget in ipairs(PlayerStatusScreen.player_widgets) do
-            if widget.age and not widget.age.hovertext then
-                widget.age:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
-            end
+        for _, widget in ipairs(PlayerStatusScreen.player_widgets) do 
+            if widget.age and not widget.age.hovertext then 
+                widget.age:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE) 
+            end 
         end
         return oldOnUpdate(self, ...)
     end
@@ -1426,37 +2577,41 @@ AddClassPostConstruct('screens/playerstatusscreen', function(PlayerStatusScreen)
     local oldOnControl = PlayerStatusScreen.OnControl
     function PlayerStatusScreen:OnControl(control, down, ...)
         if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            if self.servertitle and self.servertitle.focus then
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SERVER.FORMATS.NAME, { NAME = PlayerStatusScreen.servertitle:GetString() }))
+            if self.servertitle and self.servertitle.focus then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SERVER.FORMATS.NAME, { NAME = PlayerStatusScreen.servertitle:GetString() })) 
             end
-            if self.serverstate and self.serverstate.focus then
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SERVER.FORMATS.AGE, { AGE = PlayerStatusScreen.serverage }))
+            if self.serverstate and self.serverstate.focus then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SERVER.FORMATS.AGE, { AGE = PlayerStatusScreen.serverage })) 
             end
-            if self.players_number and self.players_number.focus then
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SERVER.FORMATS.NUM_PLAYER, { NUM = PlayerStatusScreen.players_number:GetString() }))
+            if self.players_number and self.players_number.focus then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SERVER.FORMATS.NUM_PLAYER, { NUM = PlayerStatusScreen.players_number:GetString() })) 
             end
-            for _, widget in ipairs(PlayerStatusScreen.player_widgets) do
-                if widget.focus and widget.displayName then
-                    if widget.name and widget.name.focus then
-                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.GREET, { NAME = widget.displayName }))
+            for _, w in ipairs(PlayerStatusScreen.player_widgets) do
+                if w.focus and w.displayName then
+                    if w.name and w.name.focus then 
+                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.GREET, { NAME = w.displayName })) 
                     end
-                    if widget.adminBadge and widget.adminBadge.shown and widget.adminBadge.focus then
-                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.ADMIN, { NAME = widget.displayName }))
+                    if w.adminBadge and w.adminBadge.shown and w.adminBadge.focus then 
+                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.ADMIN, { NAME = w.displayName })) 
                     end
-                    if widget.perf and widget.perf.shown and widget.perf.focus and widget.perf.hovertext then
-                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.PERF, {
-                            NAME = widget.displayName, PERF = widget.perf.hovertext:GetString(),
-                            PING = (widget.userid == ThePlayer.userid and subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.PING, { PING = TheNet:GetAveragePing() }) or '')
-                        }))
+                    if w.perf and w.perf.shown and w.perf.focus and w.perf.hovertext then 
+                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.PERF, { 
+                            NAME = w.displayName, 
+                            PERF = w.perf.hovertext:GetString(), 
+                            PING = (w.userid == ThePlayer.userid and subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.PING, { PING = TheNet:GetAveragePing() }) or '') 
+                        })) 
                     end
-                    if widget.profileFlair and widget.profileFlair.shown and widget.profileFlair.focus and widget.characterBadge and widget.characterBadge.prefabname then
-                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.NAME, { NAME = widget.displayName, CHARACTER = STRINGS.NAMES[widget.characterBadge.prefabname:upper()] or widget.characterBadge.prefabname }))
+                    if w.profileFlair and w.profileFlair.shown and w.profileFlair.focus and w.characterBadge and w.characterBadge.prefabname then 
+                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.NAME, { 
+                            NAME = w.displayName, 
+                            CHARACTER = STRINGS.NAMES[w.characterBadge.prefabname:upper()] or w.characterBadge.prefabname 
+                        })) 
                     end
-                    if widget.age and widget.age.shown and widget.age.focus then
-                        local age = widget.age:GetString()
-                        if #age > 0 then
-                            return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.AGE, { NAME = widget.displayName, AGE = widget.age:GetString() }))
-                        end
+                    if w.age and w.age.shown and w.age.focus and #w.age:GetString() > 0 then 
+                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.AGE, { 
+                            NAME = w.displayName, 
+                            AGE = w.age:GetString() 
+                        })) 
                     end
                 end
             end
@@ -1465,56 +2620,87 @@ AddClassPostConstruct('screens/playerstatusscreen', function(PlayerStatusScreen)
     end
 end)
 
--- 审视自我面板
 AddClassPostConstruct('widgets/playeravatarpopup', function(PlayerAvatarPopup)
     local items = { 'body', 'hand', 'legs', 'feet', 'base', 'head_equip', 'hand_equip', 'body_equip' }
-    if PlayerAvatarPopup.age and not PlayerAvatarPopup.age.hovertext then
-        PlayerAvatarPopup.age:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
+    
+    if PlayerAvatarPopup.age and not PlayerAvatarPopup.age.hovertext then 
+        PlayerAvatarPopup.age:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE) 
     end
-    for _, item in ipairs(items) do
-        if PlayerAvatarPopup[item .. '_image'] and PlayerAvatarPopup[item .. '_image']._text and not PlayerAvatarPopup[item .. '_image']._text.hovertext then
-            PlayerAvatarPopup[item .. '_image']._text:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE)
-        end
+    
+    for _, item in ipairs(items) do 
+        if PlayerAvatarPopup[item .. '_image'] and PlayerAvatarPopup[item .. '_image']._text and not PlayerAvatarPopup[item .. '_image']._text.hovertext then 
+            PlayerAvatarPopup[item .. '_image']._text:SetHoverText(STRINGS.NOMU_QA.HOVER_TEXT_ANNOUNCE) 
+        end 
     end
 
     local oldOnControl = PlayerAvatarPopup.OnControl
     function PlayerAvatarPopup:OnControl(control, down, ...)
         if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) and self.player_name then
-            if self.age and self.age.focus and self.currentcharacter then
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.AGE_SHORT, { NAME = self.player_name, AGE = self.age:GetString() }))
+            if self.age and self.age.focus and self.currentcharacter then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.AGE_SHORT, { 
+                    NAME = self.player_name, 
+                    AGE = self.age:GetString() 
+                })) 
             end
-            if self.character_name and self.character_name.focus and self.currentcharacter then
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.NAME, { NAME = self.player_name, CHARACTER = STRINGS.NAMES[self.currentcharacter:upper()] or self.currentcharacter }))
+            if self.character_name and self.character_name.focus and self.currentcharacter then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.NAME, { 
+                    NAME = self.player_name, 
+                    CHARACTER = STRINGS.NAMES[self.currentcharacter:upper()] or self.currentcharacter 
+                })) 
             end
-            if self.puppet and self.puppet.rank and self.puppet.rank.focus and self.puppet.rank.flair and self.puppet.rank.flair.hovertext then
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.BADGE, { NAME = self.player_name, BADGE = self.puppet.rank.flair.hovertext:GetString() }))
+            if self.puppet and self.puppet.rank and self.puppet.rank.focus and self.puppet.rank.flair and self.puppet.rank.flair.hovertext then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.BADGE, { 
+                    NAME = self.player_name, 
+                    BADGE = self.puppet.rank.flair.hovertext:GetString() 
+                })) 
             end
-            if self.puppet and self.puppet.frame and self.puppet.frame.focus and self.puppet.frame.bg and self.puppet.frame.bg.hovertext then
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.BACKGROUND, { NAME = self.player_name, BACKGROUND = self.puppet.frame.bg.hovertext:GetString() }))
+            if self.puppet and self.puppet.frame and self.puppet.frame.focus and self.puppet.frame.bg and self.puppet.frame.bg.hovertext then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.BACKGROUND, { 
+                    NAME = self.player_name, 
+                    BACKGROUND = self.puppet.frame.bg.hovertext:GetString() 
+                })) 
             end
-            for _, item in ipairs(items) do
-                if self[item .. '_image'] and self[item .. '_image'].focus then
-                    return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS[item:upper()], { NAME = self.player_name, [item:upper()] = self[item .. '_image']._text:GetString() }))
-                end
+            for _, item in ipairs(items) do 
+                if self[item .. '_image'] and self[item .. '_image'].focus then 
+                    return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS[item:upper()], { 
+                        NAME = self.player_name, 
+                        [string.upper(item)] = self[item .. '_image']._text:GetString() 
+                    })) 
+                end 
             end
         end
         return oldOnControl(self, control, down, ...)
     end
 end)
 
---技能树
 AddClassPostConstruct('widgets/redux/skilltreebuilder', function(SkillTreeBuilder)
     local oldOnControl = SkillTreeBuilder.OnControl
     function SkillTreeBuilder:OnControl(control, down, ...)
         if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
+            local name = (type(self.fromfrontend) == "table" and self.fromfrontend.data and self.fromfrontend.data.name and self.fromfrontend.data.name ~= "") 
+                      and self.fromfrontend.data.name 
+                      or (self.player_name and self.player_name ~= "" and self.player_name 
+                      or (GLOBAL.TheFrontEnd:GetActiveScreen() and GLOBAL.TheFrontEnd:GetActiveScreen().player_name or "该玩家"))
+                      
+            if self.root 
+                and ((self.root.xpicon and self.root.xpicon.focus) or (self.root.xptotal and self.root.xptotal.focus) or (self.root.xp_tospend and self.root.xp_tospend.focus)) 
+                and self.root.xptotal 
+                and self.root.xptotal:GetString() then 
+                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SKILL_TREE.FORMATS.XP, { 
+                    NAME = name, 
+                    XP = self.root.xptotal:GetString() 
+                })) 
+            end
+            
             for k, v in pairs(self.skillgraphics) do
                 if v.button and v.button.focus and v.status and self.skilltreedef and self.skilltreedef[k] and self.skilltreedef[k].title then
-                    local name = type(self.fromfrontend) == "table" and self.fromfrontend.data and self.fromfrontend.data.name or ''
-                    if v.status.activated then
-                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SKILL_TREE.FORMATS.ACTIVATED, { NAME = name, SKILL = self.skilltreedef[k].title }))
-                    elseif v.status.activatable then
-                        return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SKILL_TREE.FORMATS.CAN_ACTIVATE, { NAME = name, SKILL = self.skilltreedef[k].title }))
-                    end
+                    local scheme_fmt = v.status.activated and GLOBAL.NOMU_QA.SCHEME.SKILL_TREE.FORMATS.ACTIVATED 
+                                    or (v.status.activatable and GLOBAL.NOMU_QA.SCHEME.SKILL_TREE.FORMATS.CAN_ACTIVATE 
+                                    or GLOBAL.NOMU_QA.SCHEME.SKILL_TREE.FORMATS.NOT_ACTIVATED)
+                    return Announce(subfmt(scheme_fmt, { 
+                        NAME = name, 
+                        SKILL = self.skilltreedef[k].title 
+                    }))
                 end
             end
         end
@@ -1522,832 +2708,187 @@ AddClassPostConstruct('widgets/redux/skilltreebuilder', function(SkillTreeBuilde
     end
 end)
 
---食谱
 AddClassPostConstruct('widgets/redux/cookbookpage_crockpot', function(CookbookPageCrockPot)
     local oldPopulateRecipeDetailPanel = CookbookPageCrockPot.PopulateRecipeDetailPanel
     function CookbookPageCrockPot:PopulateRecipeDetailPanel(data, ...)
         self.nomu_qa_data = data
         return oldPopulateRecipeDetailPanel(self, data, ...)
     end
+    
     CookbookPageCrockPot.nomu_qa_data = CookbookPageCrockPot.all_recipes[(TheCookbook.selected ~= nil and TheCookbook.selected[CookbookPageCrockPot.category] or 1)]
 
     local oldOnControl = CookbookPageCrockPot.OnControl
     function CookbookPageCrockPot:OnControl(control, down, ...)
-        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) then
-            if self.nomu_qa_data and self.details_root and self.details_root.focus then
-                local data = self.nomu_qa_data
-                return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.COOK.FORMATS.FOOD, {
-                    NAME = data.name,
-                    HUNGER = data.recipe_def.hunger ~= nil and math.floor(10 * data.recipe_def.hunger) / 10 or '-',
-                    SANITY = data.recipe_def.sanity ~= nil and math.floor(10 * data.recipe_def.sanity) / 10 or '-',
-                    HEALTH = data.recipe_def.health ~= nil and math.floor(10 * data.recipe_def.health) / 10 or '-'
-                }))
-            end
+        if down and control == GLOBAL.CONTROL_ACCEPT and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) and self.nomu_qa_data and self.details_root and self.details_root.focus then
+            local data = self.nomu_qa_data
+            return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.COOK.FORMATS.FOOD, { 
+                NAME = data.name, 
+                HUNGER = data.recipe_def.hunger ~= nil and math.floor(10 * data.recipe_def.hunger) / 10 or '-', 
+                SANITY = data.recipe_def.sanity ~= nil and math.floor(10 * data.recipe_def.sanity) / 10 or '-', 
+                HEALTH = data.recipe_def.health ~= nil and math.floor(10 * data.recipe_def.health) / 10 or '-' 
+            }))
         end
         return oldOnControl(self, control, down, ...)
     end
 end)
 
--- 界面
-local Screen = require "widgets/screen"
-local Widget = require "widgets/widget"
-local TEMPLATES = require "widgets/redux/templates"
-local ImageButton = require "widgets/imagebutton"
-local Image = require "widgets/image"
-local TextButton = require "widgets/textbutton"
-local Text = require "widgets/text"
-
-local NoMuScreen = Class(Screen, function(self, name, nomu_parent, width, height, title)
-    Screen._ctor(self, name)
-    self.nomu_parent = nomu_parent
-    if nomu_parent then
-        nomu_parent:Hide()
-    end
-    self.root = self:AddChild(TEMPLATES.RectangleWindow(width, height, title))
-    self.root:SetScaleMode(SCALEMODE_PROPORTIONAL)
-    self.root:SetHAnchor(ANCHOR_MIDDLE)
-    self.root:SetVAnchor(ANCHOR_MIDDLE)
-    self.root:SetPosition(0, 0)
-    --local r, g, b = unpack(UICOLOURS.BROWN_DARK)
-    --self.root:SetBackgroundTint(r, g, b, 0.6)
-
-    self.AddButton = function(x, y, w, h, text, fn)
-        local button = self.root:AddChild(ImageButton("images/global_redux.xml", "button_carny_long_normal.tex", "button_carny_long_hover.tex", "button_carny_long_disabled.tex", "button_carny_long_down.tex"))
-        button:SetFont(CHATFONT)
-        button:SetPosition(x, y, 0)
-        button.text:SetColour(0, 0, 0, 1)
-        button:SetOnClick(function()
-            fn(button)
-            if type(text) == 'function' then
-                button:SetText(text(button))
-            end
-        end)
-        button:SetTextSize(26)
-        button:SetText(type(text) == 'function' and text(button) or text)
-        button:ForceImageSize(w, h)
-        return button
-    end
-
-    self.AddSpinner = function(text, list, fn, current, label_width, spinner_width, label_height, spacing)
-        local key_options = {}
-        for i, key in ipairs(list) do
-            key_options[i] = {
-                text = key,
-                data = key
-            }
-        end
-        local key_spinner = self.root:AddChild(TEMPLATES.LabelSpinner(text, key_options, label_width or 95, spinner_width or 260, label_height or 40, spacing or 5, NEWFONT, 26, 0, fn))
-        key_spinner.spinner:SetSelected(current)
-        return key_spinner
-    end
-end)
-
-function NoMuScreen:Close()
-    if self.nomu_parent then
-        self.nomu_parent:Show()
-    end
-    TheFrontEnd:PopScreen(self)
-end
-
-function NoMuScreen:OnControl(control, down)
-    if NoMuScreen._base.OnControl(self, control, down) then
-        return true
-    end
-    if not down then
-        if control == CONTROL_PAUSE or control == CONTROL_CANCEL then
-            self:Close()
-        end
-    end
-    return true
-end
-
-local NoMuList = Class(Widget, function(self, list_item_fn, x, y, item_width, item_height, cols, rows)
-    Widget._ctor(self, "NoMuList")
-    self.x = x or 0
-    self.y = y or 0
-    self.item_width = item_width or 200
-    self.item_height = item_height or 80
-    self.cols = cols or 1
-    self.rows = rows or 10
-    self.scroll_lists = nil
-    self.list_item_fn = list_item_fn
-end)
-
-function NoMuList:Refresh(list_data, override)
-    override = override or {}
-    local function ScrollWidgetsCtor(_, index)
-        local widget = Widget("widget-" .. index)
-        widget:SetOnGainFocus(function()
-            if self.scroll_lists then
-                self.scroll_lists:OnWidgetFocus(widget)
-            end
-        end)
-        widget.nomu_list_item = widget:AddChild(self.list_item_fn(self))
-        widget.focus_forward = widget.nomu_list_item
-        return widget
-    end
-
-    local function ApplyDataToWidget(_, widget, data)
-        widget.data = data
-        widget.nomu_list_item:Hide()
-        if not data then
-            widget.focus_forward = nil
-            return
-        end
-        widget.focus_forward = widget.nomu_list_item
-        widget.nomu_list_item:Show()
-        widget.nomu_list_item:SetInfo(data)
-    end
-
-    if self.scroll_lists then
-        self.scroll_lists:Kill()
-    end
-    self.scroll_lists = self:AddChild(
-            TEMPLATES.ScrollingGrid(list_data, {
-                context = {},
-                widget_width = override.item_width or self.item_width,
-                widget_height = override.item_height or self.item_height,
-                num_visible_rows = override.rows or self.rows,
-                num_columns = override.cols or self.cols,
-                item_ctor_fn = ScrollWidgetsCtor,
-                apply_fn = ApplyDataToWidget,
-                scrollbar_offset = 10,
-                scrollbar_height_offset = -60,
-                peek_percent = 0,
-                allow_bottom_empty_row = true
-            }))
-    self.scroll_lists:SetPosition(override.x or self.x, override.y or self.y)
-end
-
-local GetInputString = Class(NoMuScreen, function(self, nomu_parent, title, value, callback, limit, width)
-    width = width or 200
-    limit = limit or 50
-    NoMuScreen._ctor(self, "GetInputString", nomu_parent, width, 130)
-
-    self.config_label = self.root:AddChild(Text(BODYTEXTFONT, 32))
-    self.config_label:SetString(title)
-    self.config_label:SetHAlign(ANCHOR_MIDDLE)
-    self.config_label:SetRegionSize(200, 40)
-    self.config_label:SetPosition(0, 40)
-
-    self.config_input = self.root:AddChild(TEMPLATES.StandardSingleLineTextEntry("", width, 40))
-    self.config_input.textbox:SetTextLengthLimit(limit)
-    self.config_input.textbox:SetString(tostring(value))
-    self.config_input:SetPosition(0, 0, 0)
-
-    self.AddButton(-50, -40, 100, 40, STRINGS.NOMU_QA.BUTTON_TEXT_APPLY, function()
-        callback(self.config_input.textbox:GetLineEditString())
-        self:Close()
-    end)
-
-    self.AddButton(50, -40, 100, 40, STRINGS.NOMU_QA.BUTTON_TEXT_CLOSE, function()
-        self:Close()
-    end)
-end)
-
-local ConfirmDialog = Class(NoMuScreen, function(self, nomu_parent, title, callback)
-    NoMuScreen._ctor(self, "ConfirmDialog", nomu_parent, 250, 90)
-
-    self.config_label = self.root:AddChild(Text(BODYTEXTFONT, 32))
-    self.config_label:SetString(title)
-    self.config_label:SetHAlign(ANCHOR_MIDDLE)
-    self.config_label:SetRegionSize(250, 40)
-    self.config_label:SetPosition(0, 20)
-
-    self.AddButton(-50, -20, 100, 40, STRINGS.NOMU_QA.BUTTON_TEXT_YES, function()
-        callback()
-        self:Close()
-    end)
-
-    self.AddButton(50, -20, 100, 40, STRINGS.NOMU_QA.BUTTON_TEXT_NO, function()
-        self:Close()
-    end)
-end)
-
-local CharacterPicker = Class(NoMuScreen, function(self, nomu_parent, callback)
-    local iw, ih = 120, 40
-    local width, height = iw + 10, 80 + ih * 4
-    NoMuScreen._ctor(self, "CharacterPicker", nomu_parent, width, height + 10)
-
-    self.character_list = self.root:AddChild(NoMuList(function()
-        local item = Widget('character-list-item')
-        item.backing = item:AddChild(TEMPLATES.ListItemBackground(iw, ih, function()
-        end))
-        item.backing.move_on_click = true
-
-        item.text = item:AddChild(Text(BODYTEXTFONT, 26, nil, UICOLOURS.WHITE))
-        item.SetInfo = function(_, character)
-            local name = character == 'DEFAULT' and STRINGS.NOMU_QA.TITLE_TEXT_MAPPING_DEFAULT or STRINGS.NAMES[character:upper()] or character:upper()
-            item.text:SetString(name)
-            item.backing:SetOnClick(function()
-                callback(character)
-                self:Close()
-            end)
-        end
-
-        item.focus_forward = item.backing
-        return item
-    end, 0, 0, iw, ih, math.floor(width / iw), math.floor((height - 80) / ih)))
-
-    self.AddButton(0, -height / 2 + 20, 120, 40, STRINGS.NOMU_QA.BUTTON_TEXT_CLOSE, function()
-        self:Close()
-    end)
-    local character_list = { 'DEFAULT' }
-    for _, character in ipairs(DST_CHARACTERLIST) do
-        table.insert(character_list, character)
-    end
-    self.character_list:Refresh(character_list)
-end)
-
-local QAConfigPanel = Class(NoMuScreen, function(self, nomu_parent)
-    local width, height = 200, 200
-    NoMuScreen._ctor(self, "QAConfigPanel", nomu_parent, width, height + 10)
-
-    local sy = height / 2 - 20
-    local row = 0
-
-    self.AddButton(0, sy - row * 40, 200, 40, function()
-        return GLOBAL.NOMU_QA.DATA.DEFAULT_WHISPER and STRINGS.NOMU_QA.BUTTON_TEXT_DEFAULT_WHISPER_ON or STRINGS.NOMU_QA.BUTTON_TEXT_DEFAULT_WHISPER_OFF
-    end, function()
-        GLOBAL.NOMU_QA.DATA.DEFAULT_WHISPER = not GLOBAL.NOMU_QA.DATA.DEFAULT_WHISPER
-        GLOBAL.NOMU_QA.SaveData()
-    end)
-    row = row + 1
-
-    self.AddButton(0, sy - row * 40, 200, 40, function()
-        return GLOBAL.NOMU_QA.DATA.CHARACTER_SPECIFIC and STRINGS.NOMU_QA.BUTTON_TEXT_CHARACTER_SPECIFIC_ON or STRINGS.NOMU_QA.BUTTON_TEXT_CHARACTER_SPECIFIC_OFF
-    end, function()
-        GLOBAL.NOMU_QA.DATA.CHARACTER_SPECIFIC = not GLOBAL.NOMU_QA.DATA.CHARACTER_SPECIFIC
-        GLOBAL.NOMU_QA.SaveData()
-    end)
-    row = row + 1
-
-    self.AddButton(0, sy - row * 40, 200, 40, function()
-        return GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE and STRINGS.NOMU_QA.BUTTON_TEXT_FREQ_AUTO_CLOSE_ON or STRINGS.NOMU_QA.BUTTON_TEXT_FREQ_AUTO_CLOSE_OFF
-    end, function()
-        GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE = not GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE
-        GLOBAL.NOMU_QA.SaveData()
-    end)
-    row = row + 1
-
-    self.AddButton(0, sy - row * 40, 200, 40, function()
-        return GLOBAL.NOMU_QA.DATA.SHOW_ME == 1 and STRINGS.NOMU_QA.BUTTON_TEXT_SHOW_ME_ON or GLOBAL.NOMU_QA.DATA.SHOW_ME == 2 and STRINGS.NOMU_QA.BUTTON_TEXT_SHOW_ME_GIFT or STRINGS.NOMU_QA.BUTTON_TEXT_SHOW_ME_OFF
-    end, function()
-        if GLOBAL.NOMU_QA.DATA.SHOW_ME == 1 then
-            GLOBAL.NOMU_QA.DATA.SHOW_ME = 2
-        elseif GLOBAL.NOMU_QA.DATA.SHOW_ME == 2 then
-            GLOBAL.NOMU_QA.DATA.SHOW_ME = 0
-        else
-            GLOBAL.NOMU_QA.DATA.SHOW_ME = 1
-        end
-        GLOBAL.NOMU_QA.SaveData()
-    end)
-    row = row + 1
-
-    self.AddButton(0, sy - row * 40, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_CLOSE, function()
-        self:Close()
-    end)
-end)
-
-local function CreateDefaultScheme()
-    local scheme = json.decode(json.encode(GLOBAL.STRINGS.DEFAULT_NOMU_QA))
-    for k in pairs(scheme) do
-        if scheme[k].MAPPINGS.DEFAULT then
-            scheme[k].MAPPINGS = {
-                DEFAULT = scheme[k].MAPPINGS.DEFAULT
-            }
-        end
-    end
-    return scheme
-end
-
-local function ValidateScheme(scheme)
-    -- TODO: 更多的验证
-    return scheme.name ~= nil and scheme.data ~= nil and scheme.version ~= nil
-end
-
-local QACustomizePanel = Class(NoMuScreen, function(self, nomu_parent)
-    local width, height = 860, 480
-    local sy, sx, dy = height / 2 - 20, -width / 2, 40
-    self.sx = sx
-    self.sy = sy
-    self.dy = dy
-    NoMuScreen._ctor(self, "QACustomizePanel", nomu_parent, width, height + 10)
-
-    self.scheme_idx = 1
-
-    self.title_text_schemes = self.root:AddChild(Text(BODYTEXTFONT, 32))
-    self.title_text_schemes:SetString(STRINGS.NOMU_QA.TITLE_TEXT_SCHEMES)
-    self.title_text_schemes:SetHAlign(ANCHOR_MIDDLE)
-    self.title_text_schemes:SetRegionSize(200, dy)
-    self.title_text_schemes:SetPosition(sx + 100, sy)
-
-    self.AddButton(sx + 100, sy - dy, 200, dy, STRINGS.NOMU_QA.BUTTON_TEXT_NEW_SCHEME, function()
-        TheFrontEnd:PushScreen(GetInputString(self, STRINGS.NOMU_QA.BUTTON_TEXT_NEW_SCHEME, '', function(value)
-            table.insert(GLOBAL.NOMU_QA.DATA.SCHEMES, {
-                name = value,
-                data = CreateDefaultScheme(),
-                version = VERSION
-            })
-            GLOBAL.NOMU_QA.SaveData()
-            self:RefreshSchemeList()
-            self:RefreshScheme(#GLOBAL.NOMU_QA.DATA.SCHEMES)
-        end))
-    end)
-
-    self.scheme_list = self.root:AddChild(NoMuList(function()
-        local item = Widget('scheme-list-item')
-        item.backing = item:AddChild(TEMPLATES.ListItemBackground(200, 40, function()
-        end))
-        item.backing.move_on_click = true
-
-        item.text = item:AddChild(Text(BODYTEXTFONT, 20, nil, UICOLOURS.WHITE))
-
-        item.delete = item:AddChild(TextButton())
-        item.delete:SetFont(CHATFONT)
-        item.delete:SetTextSize(20)
-        item.delete:SetText(STRINGS.NOMU_QA.BUTTON_TEXT_DELETE)
-        item.delete:SetPosition(70, 0, 0)
-        item.delete:SetTextFocusColour({ 1, 1, 1, 1 })
-        item.delete:SetTextColour({ 1, 0, 0, 1 })
-        item.delete:Hide()
-
-        item.rename = item:AddChild(TextButton())
-        item.rename:SetFont(CHATFONT)
-        item.rename:SetTextSize(20)
-        item.rename:SetText(STRINGS.NOMU_QA.BUTTON_TEXT_RENAME)
-        item.rename:SetPosition(-70, 0, 0)
-        item.rename:SetTextFocusColour({ 1, 1, 1, 1 })
-        item.rename:SetTextColour({ 0, 1, 0, 1 })
-        item.rename:Hide()
-
-        function item:OnGainFocus()
-            self.delete:Show()
-            if not item.no_rename then
-                item.rename:Show()
-            end
-        end
-
-        function item:OnLoseFocus()
-            self.delete:Hide()
-            if not item.no_rename then
-                item.rename:Hide()
-            end
-        end
-
-        item.SetInfo = function(_, data)
-            item.text:SetString(data.name)
-            item.backing:SetOnClick(function()
-                self:RefreshScheme(data.idx)
-            end)
-
-            if data.idx == 1 then
-                item.rename:Hide()
-                item.no_rename = true
-                item.delete:SetText(STRINGS.NOMU_QA.BUTTON_TEXT_RESET)
-                item.delete:SetOnClick(function()
-                    TheFrontEnd:PushScreen(ConfirmDialog(nil, STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_RESET_DEFAULT, function()
-                        GLOBAL.NOMU_QA.DATA.SCHEMES[1].data = json.decode(json.encode(GLOBAL.STRINGS.DEFAULT_NOMU_QA))
-                        GLOBAL.NOMU_QA.SaveData()
-                        self:RefreshScheme(1)
-                    end))
-                end)
-            else
-                item.delete:SetOnClick(function()
-                    TheFrontEnd:PushScreen(ConfirmDialog(nil, STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_DELETE, function()
-                        table.remove(GLOBAL.NOMU_QA.DATA.SCHEMES, data.idx)
-                        GLOBAL.NOMU_QA.SaveData()
-                        self:RefreshSchemeList()
-                        if data.idx == self.scheme_idx then
-                            self:RefreshScheme(1)
-                        elseif data.idx < self.scheme_idx then
-                            self:RefreshScheme(self.scheme_idx - 1)
-                        end
-                    end))
-                end)
-
-                item.rename:SetOnClick(function()
-                    TheFrontEnd:PushScreen(GetInputString(nil, STRINGS.NOMU_QA.BUTTON_TEXT_RENAME, data.name, function(value)
-                        GLOBAL.NOMU_QA.DATA.SCHEMES[data.idx].name = value
-                        GLOBAL.NOMU_QA.SaveData()
-                        self:RefreshSchemeList()
-                        self:RefreshScheme(data.idx)
-                    end))
-                end)
-            end
-        end
-
-        item.focus_forward = item.backing
-        return item
-    end, sx + 100, -20, 200, 40, 1, 9))
-
-    self.AddButton(sx + 100, -sy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_IMPORT_SCHEME, function()
-        TheFrontEnd:PushScreen(GetInputString(nil, STRINGS.NOMU_QA.TITLE_TEXT_SCHEME_FILENAME, '', function(filename)
-            if string.sub(filename, -5) ~= '.json' then
-                TheFrontEnd:PushScreen(ConfirmDialog(nil, STRINGS.NOMU_QA.JSON_NEEDED, function() end))
-                return
-            end
-            local file = io.open('unsafedata/' .. filename)
-            if file then
-                local json_str = file:read('*a')
-                file:close()
-                local scheme = json.decode(json_str)
-                if ValidateScheme(scheme) then
-                    table.insert(GLOBAL.NOMU_QA.DATA.SCHEMES, scheme)
-                    GLOBAL.NOMU_QA.SaveData()
-                    self:RefreshSchemeList()
-                    self:RefreshScheme(#GLOBAL.NOMU_QA.DATA.SCHEMES)
-                    ThePlayer.components.talker:Say(STRINGS.NOMU_QA.MESSAGE_IMPORT_SUCCEED)
-                    return
-                end
-            end
-            ThePlayer.components.talker:Say(STRINGS.NOMU_QA.MESSAGE_IMPORT_FAILED)
-        end))
-    end)
-
-    self.vertical_line = self.root:AddChild(Image("images/global_redux.xml", "item_divider.tex"))
-    self.vertical_line:SetRotation(90)
-    self.vertical_line:SetScale(1, 0.57)
-
-    sx = sx + 260
-    self.title_text_editing = self.root:AddChild(Text(BODYTEXTFONT, 32))
-    self.title_text_editing:SetHAlign(ANCHOR_MIDDLE)
-    self.title_text_editing:SetRegionSize(600, dy)
-    self.title_text_editing:SetPosition(sx + 300, sy)
-
-    --self.AddButton(sx + 100, sy - dy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_RESET_SCHEME, function()
-    --    TheFrontEnd:PushScreen(ConfirmDialog(nil, subfmt(STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_RESET_SCHEME, { NAME = self.scheme.name }), function()
-    --        if self.scheme_idx == 1 then
-    --            GLOBAL.NOMU_QA.DATA.SCHEMES[1].data = json.decode(json.encode(GLOBAL.STRINGS.DEFAULT_NOMU_QA))
-    --            GLOBAL.NOMU_QA.SaveData()
-    --        end
-    --        self:RefreshScheme()
-    --    end))
-    --end)
-
-    self.AddButton(sx + 300, -sy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_APPLY_SCHEME, function()
-        TheFrontEnd:PushScreen(ConfirmDialog(nil, subfmt(STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_APPLY_SCHEME, { NAME = self.scheme.name }), function()
-            GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME = GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx]
-            GLOBAL.NOMU_QA.SaveData()
-            GLOBAL.NOMU_QA.ApplyScheme(GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME)
-        end))
-    end)
-
-    --self.AddButton(sx + 300, sy - dy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_SAVE_SCHEME, function()
-    --    TheFrontEnd:PushScreen(ConfirmDialog(nil, subfmt(STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_SAVE_SCHEME, { NAME = self.scheme.name }), function()
-    --        GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx] = json.decode(json.encode(self.scheme))
-    --        GLOBAL.NOMU_QA.SaveData()
-    --    end))
-    --end)
-    --
-    --self.AddButton(sx + 500, sy - dy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_SAVE_AND_APPLY_SCHEME, function()
-    --    TheFrontEnd:PushScreen(ConfirmDialog(nil, subfmt(STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_SAVE_APPLY_SCHEME, { NAME = self.scheme.name }), function()
-    --        GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx] = json.decode(json.encode(self.scheme))
-    --        GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME = GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx]
-    --        GLOBAL.NOMU_QA.SaveData()
-    --        GLOBAL.NOMU_QA.ApplyScheme(GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME)
-    --end)
-
-    local function save_and_apply()
-        GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx] = json.decode(json.encode(self.scheme))
-        GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME = GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx]
-        GLOBAL.NOMU_QA.SaveData()
-        GLOBAL.NOMU_QA.ApplyScheme(GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME)
-    end
-
-    self.AddButton(sx + 100, -sy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_EXPORT_SCHEME, function()
-        TheFrontEnd:PushScreen(GetInputString(nil, STRINGS.NOMU_QA.TITLE_TEXT_SCHEME_FILENAME, '', function(filename)
-            if string.sub(filename, -5) ~= '.json' then
-                TheFrontEnd:PushScreen(ConfirmDialog(nil, STRINGS.NOMU_QA.JSON_NEEDED, function() end))
-                return
-            end
-            local json_str = json.encode(GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx])
-            local file = io.open('unsafedata/' .. filename, 'w')
-            if file then
-                file:write(json_str)
-                file:close()
-                ThePlayer.components.talker:Say(STRINGS.NOMU_QA.MESSAGE_EXPORT_SUCCEED)
-            else
-                ThePlayer.components.talker:Say(STRINGS.NOMU_QA.MESSAGE_EXPORT_FAILED)
-            end
-        end))
-    end)
-
-    self.AddButton(sx + 500, -sy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_CLOSE, function()
-        self:Close()
-    end)
-
-    self.title_text_func = self.root:AddChild(Text(BODYTEXTFONT, 32))
-    self.title_text_func:SetHAlign(ANCHOR_MIDDLE)
-    self.title_text_func:SetRegionSize(120, dy)
-    self.title_text_func:SetPosition(sx + 60, sy - dy)
-    self.title_text_func:SetString(STRINGS.NOMU_QA.TITLE_TEXT_FUNC)
-
-    self.func_list = self.root:AddChild(NoMuList(function()
-        local item = Widget('func-list-item')
-        item.backing = item:AddChild(TEMPLATES.ListItemBackground(120, 40, function()
-        end))
-        item.backing.move_on_click = true
-
-        item.text = item:AddChild(Text(BODYTEXTFONT, 20, nil, UICOLOURS.WHITE))
-
-        item.SetInfo = function(_, func)
-            item.text:SetString(STRINGS.NOMU_QA.FUNC[func])
-            item.backing:SetOnClick(function()
-                self:RefreshFunc(func)
-            end)
-        end
-
-        item.focus_forward = item.backing
-        return item
-    end, sx + 60, -20, 120, 40, 1, 9))
-
-    sx = sx + 160
-    self.title_text_format = self.root:AddChild(Text(BODYTEXTFONT, 32))
-    self.title_text_format:SetHAlign(ANCHOR_MIDDLE)
-    self.title_text_format:SetRegionSize(420, dy)
-    self.title_text_format:SetPosition(sx + 210, sy - dy)
-
-    self.format_list = self.root:AddChild(NoMuList(function()
-        local item = Widget('format-list-item')
-        item.backing = item:AddChild(TEMPLATES.ListItemBackground(420, 40, function()
-        end))
-        item.backing.move_on_click = true
-
-        item.text = item:AddChild(Text(BODYTEXTFONT, 20, nil, UICOLOURS.WHITE))
-
-        item.SetInfo = function(_, format)
-            item.text:SetString(format.name .. ': ' .. format.value)
-            item.backing:SetOnClick(function()
-                TheFrontEnd:PushScreen(GetInputString(nil, STRINGS.NOMU_QA.FUNC[self.scheme_func] .. '-' .. format.name, format.value, function(value)
-                    self.scheme.data[self.scheme_func].FORMATS[format.name] = value
-                    save_and_apply()
-                    self:RefreshFunc()
-                end, 256, 420))
-            end)
-        end
-
-        item.focus_forward = item.backing
-        return item
-    end, sx + 210, sy - 3.5 * dy, 420, 40, 1, 3))
-
-    self.btn_mapping = self.AddButton(sx + 210, sy - 5 * dy, 200, 40, STRINGS.NOMU_QA.BUTTON_TEXT_MAPPING, function()
-        TheFrontEnd:PushScreen(CharacterPicker(nil, function(mapping)
-            mapping = mapping:upper()
-            if not self.scheme.data[self.scheme_func].MAPPINGS[mapping] then
-                self.scheme.data[self.scheme_func].MAPPINGS[mapping] = json.decode(json.encode(self.scheme.data[self.scheme_func].MAPPINGS.DEFAULT))
-            end
-            self:RefreshFunc(nil, mapping)
-        end))
-    end)
-
-    if not GLOBAL.NOMU_QA.DATA.CHARACTER_SPECIFIC then
-        self.btn_mapping:Disable()
-    end
-
-    self.mapping_list = self.root:AddChild(NoMuList(function()
-        local item = Widget('mapping-list-item')
-        item.backing = item:AddChild(TEMPLATES.ListItemBackground(420, 40, function()
-        end))
-        item.backing.move_on_click = true
-
-        item.text = item:AddChild(Text(BODYTEXTFONT, 20, nil, UICOLOURS.WHITE))
-
-        item.SetInfo = function(_, mapping)
-            item.text:SetString(mapping.category .. '-' .. mapping.name .. ': ' .. mapping.value)
-            item.backing:SetOnClick(function()
-                TheFrontEnd:PushScreen(GetInputString(nil, mapping.category .. '-' .. mapping.name, mapping.value, function(value)
-                    self.scheme.data[self.scheme_func].MAPPINGS[self.scheme_mapping][mapping.category][mapping.name] = value
-                    save_and_apply()
-                    self:RefreshFunc()
-                end, 256, 420))
-            end)
-        end
-
-        item.focus_forward = item.backing
-        return item
-    end, sx + 210, sy - 8 * dy, 420, 40, 1, 5))
-
-    self:RefreshSchemeList()
-    self:RefreshScheme(1)
-end)
-
-function QACustomizePanel:RefreshSchemeList()
-    self.vertical_line:SetPosition(self.sx + (#GLOBAL.NOMU_QA.DATA.SCHEMES <= 9 and 220 or 230), 0)
-    local scheme_list = {}
-    for idx, scheme in ipairs(GLOBAL.NOMU_QA.DATA.SCHEMES) do
-        table.insert(scheme_list, { idx = idx, name = scheme.name })
-    end
-    self.scheme_list:Refresh(scheme_list)
-end
-
-function QACustomizePanel:RefreshScheme(idx)
-    self.scheme_idx = idx or self.scheme_idx
-    self.scheme = json.decode(json.encode(GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx]))
-    self.title_text_editing:SetString(STRINGS.NOMU_QA.TITLE_TEXT_EDITING .. self.scheme.name)
-    local func_list = {}
-    for func in pairs(self.scheme.data) do
-        table.insert(func_list, func)
-    end
-    self.func_list:Refresh(func_list)
-    self:RefreshFunc(func_list[1], 'DEFAULT')
-end
-
-function QACustomizePanel:RefreshFunc(func, mapping)
-    self.scheme_func = func or self.scheme_func
-    self.title_text_format:SetString(subfmt(STRINGS.NOMU_QA.TITLE_TEXT_FORMAT, { NAME = STRINGS.NOMU_QA.FUNC[self.scheme_func] }))
-    local format_list = {}
-    for name, format in pairs(self.scheme.data[self.scheme_func].FORMATS) do
-        table.insert(format_list, { name = name, value = format })
-    end
-
-    local mapping_list = {}
-    if self.scheme.data[self.scheme_func].MAPPINGS.DEFAULT then
-        self.scheme_mapping = mapping or self.scheme_mapping
-        if not self.scheme.data[self.scheme_func].MAPPINGS[self.scheme_mapping] then
-            self.scheme_mapping = 'DEFAULT'
-        end
-        self.mapping_list:Show()
-        self.btn_mapping:Show()
-        self.btn_mapping:SetText(subfmt(STRINGS.NOMU_QA.BUTTON_TEXT_MAPPING, {
-            NAME = (self.scheme_mapping == 'DEFAULT' and STRINGS.NOMU_QA.TITLE_TEXT_MAPPING_DEFAULT or STRINGS.NAMES[self.scheme_mapping] or self.scheme_mapping)
-        }))
-        for category, items in pairs(self.scheme.data[self.scheme_func].MAPPINGS[self.scheme_mapping]) do
-            for name, value in pairs(items) do
-                table.insert(mapping_list, { category = category, name = name, value = value })
-            end
-        end
-    else
-        self.mapping_list:Hide()
-        self.btn_mapping:Hide()
-    end
-
-    local n_format = math.min(8 - math.min(#mapping_list, 4), #format_list)
-    self.format_list:Refresh(format_list, {
-        rows = n_format, y = self.sy - self.dy * (1.5 + 0.5 * n_format)
-    })
-
-    self.btn_mapping:SetPosition(self.sx + 630, self.sy - (2 + n_format) * self.dy)
-
-    local n_mapping = 8 - n_format
-    self.mapping_list:Refresh(mapping_list, {
-        rows = n_mapping, y = self.sy - (2.5 + 0.5 * n_mapping + n_format) * self.dy
-    })
-end
-
-local QAPanel = Class(Widget, function(self)
-    local width, height = 400, 480
-    local sy = height / 2 - 20
-    local dy = 40
-
-    Widget._ctor(self, "QAPanel")
-
-    self.root = self:AddChild(TEMPLATES.RectangleWindow(width, height + 10))
-    self.root:SetScaleMode(SCALEMODE_PROPORTIONAL)
-    self.root:SetHAnchor(ANCHOR_MIDDLE)
-    self.root:SetVAnchor(ANCHOR_MIDDLE)
-    self.root:SetPosition(0, 0)
-
-    local function AddButton(x, y, w, h, text, fn)
-        local button = self.root:AddChild(ImageButton("images/global_redux.xml", "button_carny_long_normal.tex", "button_carny_long_hover.tex", "button_carny_long_disabled.tex", "button_carny_long_down.tex"))
-        button:SetFont(CHATFONT)
-        button:SetPosition(x, y, 0)
-        button.text:SetColour(0, 0, 0, 1)
-        button:SetOnClick(function()
-            fn(button)
-            if type(text) == 'function' then
-                button:SetText(text(button))
-            end
-        end)
-        button:SetTextSize(26)
-        button:SetText(type(text) == 'function' and text(button) or text)
-        button:ForceImageSize(w, h)
-        return button
-    end
-
-    self.title_text = self.root:AddChild(Text(BODYTEXTFONT, 32))
-    self.title_text:SetString(STRINGS.NOMU_QA.TITLE_TEXT_QA)
-    self.title_text:SetHAlign(ANCHOR_MIDDLE)
-    self.title_text:SetRegionSize(width, dy)
-    self.title_text:SetPosition(0, sy)
-
-    AddButton(-100, sy - dy, 200, dy, STRINGS.NOMU_QA.BUTTON_TEXT_NEW_FREQ, function()
-        TheFrontEnd:PushScreen(GetInputString(self, STRINGS.NOMU_QA.BUTTON_TEXT_NEW_FREQ, '', function(value)
-            table.insert(GLOBAL.NOMU_QA.DATA.FREQ_LIST, value)
-            GLOBAL.NOMU_QA.SaveData()
-            self:Refresh()
-        end, 256, 420))
-    end)
-
-    AddButton(100, sy - dy, 200, dy, STRINGS.NOMU_QA.BUTTON_TEXT_CUSTOMIZE, function()
-        TheFrontEnd:PushScreen(QACustomizePanel(self))
-    end)
-
-    self.freq_list = self.root:AddChild(NoMuList(function()
-        local item = Widget('freq-list-item')
-        item.backing = item:AddChild(TEMPLATES.ListItemBackground(200, 40, function()
-        end))
-        item.backing.move_on_click = true
-
-        item.text = item:AddChild(Text(BODYTEXTFONT, 20, nil, UICOLOURS.WHITE))
-
-        item.delete = item:AddChild(TextButton())
-        item.delete:SetFont(CHATFONT)
-        item.delete:SetTextSize(20)
-        item.delete:SetText(STRINGS.NOMU_QA.BUTTON_TEXT_DELETE)
-        item.delete:SetPosition(80, 0, 0)
-        item.delete:SetTextFocusColour({ 1, 1, 1, 1 })
-        item.delete:SetTextColour({ 1, 0, 0, 1 })
-        item.delete:Hide()
-
-        function item:OnGainFocus()
-            self.delete:Show()
-        end
-
-        function item:OnLoseFocus()
-            self.delete:Hide()
-        end
-
-        item.SetInfo = function(_, data)
-            item.text:SetString(data.freq)
-            item.backing:SetOnClick(function()
-                Announce(data.freq)
-                if GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE then
-                    self:Hide()
-                end
-            end)
-
-            item.delete:SetOnClick(function()
-                TheFrontEnd:PushScreen(ConfirmDialog(nil, STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_DELETE, function()
-                    table.remove(GLOBAL.NOMU_QA.DATA.FREQ_LIST, data.idx)
-                    GLOBAL.NOMU_QA.SaveData()
-                    self:Refresh()
-                end))
-            end)
-        end
-
-        item.focus_forward = item.backing
-        return item
-    end, 0, 0, 200, 40, 2, 8))
-
-    AddButton(-100, -sy, 200, dy, STRINGS.NOMU_QA.BUTTON_TEXT_OPTIONS, function()
-        TheFrontEnd:PushScreen(QAConfigPanel(self))
-    end)
-
-    AddButton(100, -sy, 200, dy, STRINGS.NOMU_QA.BUTTON_TEXT_CLOSE, function()
-        self:Hide()
-    end)
-
-    self:Refresh()
-end)
-
-function QAPanel:Refresh()
-    local freq_list = {}
-    for idx, freq in ipairs(GLOBAL.NOMU_QA.DATA.FREQ_LIST) do
-        table.insert(freq_list, { idx = idx, freq = freq })
-    end
-    self.freq_list:Refresh(freq_list)
-end
-
-function QAPanel:OnGainFocus()
-    self.camera_controllable_reset = TheCamera:IsControllable()
-    TheCamera:SetControllable(false)
-end
-
-function QAPanel:OnLoseFocus()
-    TheCamera:SetControllable(self.camera_controllable_reset)
-end
-
-function QAPanel:OnControl(control, down)
-    if QAPanel._base.OnControl(self, control, down) then
-        return true
-    end
-    if not down then
-        if control == CONTROL_PAUSE or control == CONTROL_CANCEL then
-            self:Hide()
-        end
-    end
-    return true
-end
-
 local controls
 AddClassPostConstruct("widgets/controls", function(self)
     controls = self
-    if controls and controls.top_root then
-        controls.nomu_qa_panel = controls.top_root:AddChild(QAPanel())
-        controls.nomu_qa_panel:Hide()
+    if controls and controls.top_root then 
+        controls.nomu_qa_panel = controls.top_root:AddChild(GLOBAL.NOMU_QA.QAPanel())
+        controls.nomu_qa_panel:Hide() 
     end
 end)
 
-local key_toggle = GetModConfigData("key_toggle") ~= -1 and GLOBAL[GetModConfigData("key_toggle")] or -1
+local key_toggle = GetModConfigData("announcekey_toggle") 
 TheInput:AddKeyUpHandler(key_toggle, function()
-    if IsDefaultScreen() then
-        if controls and controls.nomu_qa_panel then
-            if controls.nomu_qa_panel.shown then
-                controls.nomu_qa_panel:Hide()
-            else
-                controls.nomu_qa_panel:Show()
+    if IsDefaultScreen() and controls and controls.nomu_qa_panel then
+        if controls.nomu_qa_panel.shown then 
+            controls.nomu_qa_panel:Hide() 
+        else 
+            controls.nomu_qa_panel:Show() 
+        end
+    end
+end)
+
+local state, m_util = GLOBAL.pcall(GLOBAL.require, "util/modutil")
+if state and m_util then
+    local function ToggleQAPanel()
+        local icons = m_util:GetIcons()
+        if icons and icons["快捷宣告"] then 
+            icons["快捷宣告"].close = true 
+        end
+        if IsDefaultScreen() and controls and controls.nomu_qa_panel then 
+            if controls.nomu_qa_panel.shown then 
+                controls.nomu_qa_panel:Hide() 
+            else 
+                controls.nomu_qa_panel:Show() 
+            end 
+        end
+    end
+    
+    local function SwitchAnnounceScheme()
+        local icons = m_util:GetIcons()
+        if icons and icons["快捷宣告"] then 
+            icons["快捷宣告"].close = false 
+        end
+        
+        local qadata = GLOBAL.NOMU_QA.DATA
+        if not qadata or not qadata.SCHEMES or #qadata.SCHEMES == 0 then 
+            return 
+        end
+        
+        local current_name = qadata.CURRENT_SCHEME and qadata.CURRENT_SCHEME.name
+        local next_idx = 1
+        for i, scheme in ipairs(qadata.SCHEMES) do 
+            if scheme.name == current_name then 
+                next_idx = (i % #qadata.SCHEMES) + 1
+                break 
+            end 
+        end
+        
+        local new_scheme = qadata.SCHEMES[next_idx]
+        qadata.CURRENT_SCHEME = new_scheme
+        GLOBAL.NOMU_QA.ApplyScheme(new_scheme)
+        GLOBAL.NOMU_QA.SaveData()
+        
+        if GLOBAL.ThePlayer and GLOBAL.ThePlayer.components.talker then 
+            GLOBAL.ThePlayer.components.talker:Say("宣告风格已切换为: " .. tostring(new_scheme.name)) 
+        end
+    end
+    
+    m_util:AddBindIcon("快捷宣告", "playbill_the_veil", STRINGS.LMB .. "打开设置" .. STRINGS.RMB .. "切换风格", false, ToggleQAPanel, SwitchAnnounceScheme)
+end
+
+local PREFAB_MOD_CACHE, BUILD_CACHE = {}, {}
+
+local function GetModNameForPrefab(prefab)
+    if PREFAB_MOD_CACHE[prefab] ~= nil then 
+        return PREFAB_MOD_CACHE[prefab] 
+    end
+    
+    for _, modname in ipairs(GLOBAL.KnownModIndex:GetModNames()) do
+        local pre = GLOBAL.Prefabs["MOD_" .. modname]
+        if pre ~= nil and table.contains(pre.deps, prefab) then 
+            PREFAB_MOD_CACHE[prefab] = GLOBAL.KnownModIndex:GetModFancyName(modname)
+            return PREFAB_MOD_CACHE[prefab] 
+        end
+    end
+    
+    PREFAB_MOD_CACHE[prefab] = false
+    return false
+end
+
+local function GetBuildCached(inst)
+    if not inst or not inst.entity or not inst.prefab then return nil end
+    if BUILD_CACHE[inst.prefab] then return BUILD_CACHE[inst.prefab] end
+    
+    local str = inst.entity:GetDebugString()
+    if not str then return nil end
+    
+    local bank, build = str:match("bank: (.+) build: (.+) anim: ")
+    if bank and build then 
+        BUILD_CACHE[inst.prefab] = "\n动画: anim/"..bank..".zip\n贴图: anim/"..build..".zip"
+        return BUILD_CACHE[inst.prefab] 
+    end
+    return nil
+end
+
+AddClassPostConstruct("widgets/hoverer", function(hoverer)
+    if TUNING.SERVER_SIMS then return end
+    
+    local oldSetString = hoverer.text.SetString
+    hoverer.text.SetString = function(text, str, ...)
+        local show_mod = GLOBAL.NOMU_QA.DATA.SHOW_MOD_NAME
+        local asset_mode = GLOBAL.NOMU_QA.DATA.SHOW_ASSET_INFO
+        
+        if not show_mod and (not asset_mode or asset_mode == 0) then 
+            return oldSetString and oldSetString(text, str, ...) 
+        end
+
+        local target = GLOBAL.TheInput:GetHUDEntityUnderMouse()
+        target = (target and target.widget and target.widget.parent ~= nil and target.widget.parent.item) 
+              or GLOBAL.TheInput:GetWorldEntityUnderMouse() 
+              or nil
+
+        if target and target.prefab then
+            str = str:gsub("%s+$", "")
+            
+            if show_mod then
+                local cached_mod = GetModNameForPrefab(target.prefab)
+                if cached_mod then 
+                    str = str .. "\n" .. (STRINGS.NOMU_QA.SHOW_MOD_PREFIX or "Mod: ") .. cached_mod 
+                end
             end
+            
+            if asset_mode and asset_mode > 0 then
+                str = str .. "\n代码:" .. target.prefab
+                if asset_mode == 2 then
+                    local build_info = GetBuildCached(target)
+                    if build_info then 
+                        str = str .. build_info 
+                    end
+                end
+            end
+        end
+        
+        if oldSetString then 
+            return oldSetString(text, str, ...) 
+        end
+    end
+end)
+
+AddComponentPostInit("playercontroller", function(self)
+    local old_OnControl = self.OnControl
+    function self:OnControl(control, down, ...)
+        if GLOBAL.NOMU_QA.DATA.BLOCK_ACTION and (control == GLOBAL.CONTROL_PRIMARY or control == GLOBAL.CONTROL_SECONDARY) then
+            if IsDefaultScreen() and TheInput:IsControlPressed(GLOBAL.CONTROL_FORCE_INSPECT) and TheInput:IsKeyDown(GLOBAL.KEY_LSHIFT) then 
+                return true 
+            end
+        end
+        if old_OnControl then 
+            return old_OnControl(self, control, down, ...) 
         end
     end
 end)
