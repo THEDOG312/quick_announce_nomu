@@ -1766,11 +1766,29 @@ TheInput:AddMouseButtonHandler(function(button, down)
     if not (IsDefaultScreen() and TheInput:IsControlPressed(CONTROL_FORCE_INSPECT) and TheInput:IsKeyDown(KEY_LSHIFT) and down) then
         return
     end
-    if button ~= MOUSEBUTTON_LEFT then
-        return
-    end
 
     local entity = ConsoleWorldEntityUnderMouse()
+    local qa = GLOBAL.NOMU_QA.SCHEME.ENV
+
+    if button == MOUSEBUTTON_MIDDLE then -- 鼠标中键
+        if entity then
+            if not TheInput:IsKeyDown(KEY_LCTRL) and entity:HasTag('player') then
+                if entity == ThePlayer then
+                    return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.PING, { PING = TheNet:GetAveragePing() }))
+                else
+                    return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.GREET, { NAME = entity:GetDisplayName() }))
+                end
+                return
+            end
+            local entity_info = subfmt(qa.FORMATS.CODE, { PREFAB = entity.prefab, NAME = entity:GetDisplayName() })
+            print(entity_info)
+            ThePlayer.components.talker:Say(entity_info, 5)
+        end
+    end
+
+    -- 鼠标左键
+    if button ~= MOUSEBUTTON_LEFT then return end
+
     if not entity then
         local pos = TheInput:GetWorldPosition()
         local ents = TheSim:FindEntities(pos.x, pos.y, pos.z, GLOBAL.NOMU_QA.DATA.FUZZY_ANNOUNCE and 4 or 2, nil, { "INLIMBO", "player" })
@@ -1804,8 +1822,6 @@ TheInput:AddMouseButtonHandler(function(button, down)
     end
 
     if not entity then return end
-    local qa = GLOBAL.NOMU_QA.SCHEME.ENV
-
     if not TheInput:IsKeyDown(KEY_LCTRL) and entity:HasTag('player') then
         if entity == ThePlayer then
             return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.I_AM_HERE, { NAME = entity:GetDisplayName() }))

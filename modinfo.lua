@@ -12,7 +12,7 @@ description = [[
 - 删除了自定义宣告语言的功能
 ]]
 
-version = "2026-05-08"
+version = "2026-05-08-A"
 
 folder_name = folder_name or "quick_announce_nomu"
 if not folder_name:find("workshop-") then
