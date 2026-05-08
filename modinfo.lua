@@ -12,35 +12,7 @@ description = [[
 - 删除了自定义宣告语言的功能
 ]]
 
---[[
-FINISHED
-旺达钟表CD
-网络状况
-打招呼
-管理员
-幸存天数
-服务器信息
-常用语
-自定义
-WX78电路和芯片宣告
-没有皮肤时的宣告
-皮肤数量宣告
-人物头像
-可疑的大理石
-大理石雕像
-人物角色
-审视自我
-装备了
-技能树
-保留原版宣告接口
-地下时钟宣告
-智能锅联动
-食谱
-兼容信息提示：礼物包装、暖石温度、食物剩余保鲜时间
-]]
-
--- version = "0.8124.04" -- 冰冰羊：这个版本号我真的看不懂是什么意思，也不知道要怎么加数字
-version = "2026-05-8"
+version = "2026-05-08"
 
 folder_name = folder_name or "quick_announce_nomu"
 if not folder_name:find("workshop-") then
@@ -58,27 +30,10 @@ server_filter_tags = {}
 icon_atlas = "modicon.xml"
 icon = "modicon.tex"
 
-local function addTitle(title)
-	return {
-		name = "huxi",
-		label = title,
-		options = {
-			{ description = "", data = 0 },
-		},
-		default = 0,
-	}
-end
-
-local LMB = "\238\132\128"
-local RMB = "\238\132\129"
-
-local tof = {
-	{ description = "开启", data = true, },
-	{ description = "关闭", data = false, },
-}
 local function AddOpt(desc, data, hover)
 	return { description = desc, data = data, hover = hover }
 end
+
 local theKeys = {
 	AddOpt("关闭", false),
 	AddOpt("B", 98),
@@ -137,8 +92,8 @@ local theKeys = {
 	AddOpt("左ALT", 308, "游戏默认的检查键, 请确保不冲突再使用此按键"),
 	AddOpt("右ALT", 307, "游戏默认的检查键, 请确保不冲突再使用此按键"),
 	AddOpt("左CTRL", 306, "左CTRL"),
-        AddOpt("右CTRL", 305, "右CTRL"),
-        AddOpt("左Shift", 304, "左Shift"),
+	AddOpt("右CTRL", 305, "右CTRL"),
+	AddOpt("左Shift", 304, "左Shift"),
 	AddOpt("右Shift", 303, "右Shift"),
 	AddOpt("小键盘0", 256, "小键盘0"),
 	AddOpt("小键盘1", 257, "小键盘1"),
@@ -155,7 +110,7 @@ local theKeys = {
 	AddOpt("小键盘 *", 268, "小键盘 *"),
 	AddOpt("小键盘 -", 269, "小键盘 -"),
 	AddOpt("小键盘 +", 270, "小键盘 +"),
-       	AddOpt("关闭", false, " ↑↑↑ 上面不是有关闭按钮嘛 ↑↑↑ ,干嘛要在这里关"),
+	AddOpt("关闭", false, " ↑↑↑ 上面不是有关闭按钮嘛 ↑↑↑ ,干嘛要在这里关"),
 }
 local theBoardKeys = { AddOpt("功能面板", "biubiu", "将该功能在群鸟面板显示/需开启群鸟绘卷") }
 for i = 2, #theKeys + 1 do
@@ -168,6 +123,6 @@ configuration_options = {
         name = "announcekey_toggle",
         label = "快捷键（Shortcut）",
         options = theBoardKeys,
-	default = 106,
-}
+		default = 106,
+	}
 }
