@@ -348,7 +348,7 @@ local function Announce(message, no_whisper, debug_info)
     end
 
     -- 处理温度符号
-    message = message:gsub("(%d)\176([CF）])", "%1°%2")
+    message = message:gsub("(%d)\176", "%1°")
 
     -- 违禁词处理
     if GLOBAL.NOMU_QA.DATA.ENABLE_FORBIDDEN and GLOBAL.NOMU_QA.DATA.FORBIDDEN_WORDS then
