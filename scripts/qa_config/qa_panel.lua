@@ -842,7 +842,8 @@ local QACustomizePanel = Class(NoMuScreen, function(self, nomu_parent)
         item.SetInfo = function(_, data)
             item.text:SetString(data.name)
             item.backing:SetOnClick(function() self:RefreshScheme(data.idx) end)
-            if data.idx <= 5 then
+
+            if data.idx <= 4 then
                 item.rename:Hide()
                 item.no_rename = true
                 item.delete:SetText(STRINGS.NOMU_QA.BUTTON_TEXT_RESET)
@@ -855,7 +856,7 @@ local QACustomizePanel = Class(NoMuScreen, function(self, nomu_parent)
                     end)) 
                 end)
             else
-                item.delete:SetOnClick(function() 
+                item.delete:SetOnClick(function()
                     TheFrontEnd:PushScreen(ConfirmDialog(nil, STRINGS.NOMU_QA.TITLE_TEXT_SURE_TO_DELETE, function() 
                         table.remove(GLOBAL.NOMU_QA.DATA.SCHEMES, data.idx)
                         GLOBAL.NOMU_QA.SaveData()
@@ -1041,6 +1042,12 @@ function QACustomizePanel:RefreshScheme(idx)
     self.scheme = DeepCopy(GLOBAL.NOMU_QA.DATA.SCHEMES[self.scheme_idx])
     self.title_text_editing:SetString(STRINGS.NOMU_QA.TITLE_TEXT_EDITING .. self.scheme.name)
     local fl = {}
+    
+    -- 防止坏档
+    if not self.scheme.data then
+        self.scheme.data = {}
+    end
+
     for func in pairs(self.scheme.data) do 
         table.insert(fl, func) 
     end

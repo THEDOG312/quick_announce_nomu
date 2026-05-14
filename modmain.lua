@@ -110,6 +110,7 @@ GLOBAL.NOMU_QA = {
 
 -- 更新方案，补全缺失的字段
 GLOBAL.NOMU_QA.UpdateScheme = function(scheme)
+if not scheme then return end
     for func, func_value in pairs(GLOBAL.STRINGS.DEFAULT_NOMU_QA) do
         if not scheme[func] then
             scheme[func] = DeepCopy(func_value)
@@ -144,6 +145,13 @@ end
 
 -- 应用宣告方案
 GLOBAL.NOMU_QA.ApplyScheme = function(scheme)
+    if not scheme then return end
+
+    if not scheme.data then
+        print("[NoMu QA] 检测到方案数据丢失，已自动修复坏档！")
+        scheme.data = DeepCopy(GLOBAL.STRINGS.DEFAULT_NOMU_QA)
+    end
+
     GLOBAL.NOMU_QA.UpdateScheme(scheme.data)
     GLOBAL.NOMU_QA.SCHEME = scheme.data
 end
