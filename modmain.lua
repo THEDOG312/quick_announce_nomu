@@ -196,7 +196,7 @@ end
 
 
 -- 本地存储文件路径
-local DATA_FILE = 'mod_config_data/nomu_quick_announce'
+local DATA_FILE = 'mod_config_data/nomu_quick_announce_v3'
 
 -- 通用的数据类型纠正函数
 local function EnsureDataType(template_val, saved_val)
