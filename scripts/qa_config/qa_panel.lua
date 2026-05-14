@@ -798,7 +798,13 @@ local QACustomizePanel = Class(NoMuScreen, function(self, nomu_parent)
             local iscr = TheFrontEnd:GetActiveScreen()
             if iscr and iscr.name == "GetInputString" then iscr.nomu_parent = nil end
             TheFrontEnd:PushScreen(SchemeTemplatePicker(self, function(ts) 
-                table.insert(GLOBAL.NOMU_QA.DATA.SCHEMES, { name = value, data = DeepCopy(ts.data), version = VERSION })
+                table.insert(GLOBAL.NOMU_QA.DATA.SCHEMES, { 
+                    name = value, 
+                    data = DeepCopy(ts.data), 
+                    version = VERSION,
+                    source_template = ts.source_template or ts.name,
+                    backup_data = DeepCopy(ts.data)
+                })
                 GLOBAL.NOMU_QA.SaveData()
                 self:RefreshSchemeList()
                 self:RefreshScheme(#GLOBAL.NOMU_QA.DATA.SCHEMES) 

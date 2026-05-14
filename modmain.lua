@@ -36,6 +36,24 @@ local function DeepCopy(orig, copies)
     return copy
 end
 
+--提取字符串中的所有占位符并排序，用于比对
+local function GetPlaceholders(str)
+    local placeholders = {}
+    if type(str) == "string" then
+        for p in str:gmatch("{(.-)}") do
+            placeholders[p] = true
+        end
+    end
+    local sorted = {}
+    for p in pairs(placeholders) do table.insert(sorted, p) end
+    table.sort(sorted)
+    return table.concat(sorted, ",")
+end
+
+local function IsPlaceholderMatch(str1, str2)
+    return GetPlaceholders(str1) == GetPlaceholders(str2)
+end
+
 -- 检查当前是否在游戏主界面 (HUD) 且没有在打字
 local function IsDefaultScreen()
     local active_screen = GLOBAL.TheFrontEnd:GetActiveScreen()
@@ -108,39 +126,59 @@ GLOBAL.NOMU_QA = {
     SCHEME = DEFAULT_SCHEME
 }
 
--- 更新方案，补全缺失的字段
-GLOBAL.NOMU_QA.UpdateScheme = function(scheme)
-if not scheme then return end
-    for func, func_value in pairs(GLOBAL.STRINGS.DEFAULT_NOMU_QA) do
-        if not scheme[func] then
-            scheme[func] = DeepCopy(func_value)
-        else
-            for format, format_value in pairs(func_value.FORMATS) do
-                if not scheme[func].FORMATS[format] then
-                    scheme[func].FORMATS[format] = format_value
-                end
-            end
 
-            if func_value.MAPPINGS.DEFAULT then
-                for mapping, mapping_value in pairs(func_value.MAPPINGS.DEFAULT) do
-                    for _, character_value in pairs(scheme[func].MAPPINGS) do
-                        if not character_value[mapping] then
-                            character_value[mapping] = DeepCopy(mapping_value)
-                        else
-                            for item, item_value in pairs(mapping_value) do
-                                if not character_value[mapping][item] then
-                                    character_value[mapping][item] = item_value
-                                end
-                            end
-                        end
-                    end
+-- 三方同步
+local function SyncSchemeData(user_data, backup_data, source_data, is_legacy)
+    if not source_data or type(source_data) ~= "table" then return end
+    
+    for k, v in pairs(source_data) do
+        if type(v) == "table" then
+            if type(user_data[k]) ~= "table" then user_data[k] = {} end
+            if not is_legacy and type(backup_data[k]) ~= "table" then backup_data[k] = {} end
+            SyncSchemeData(user_data[k], backup_data[k], v, is_legacy)
+        else
+            if is_legacy then
+                -- 老方案处理逻辑：
+                -- 如果用户原本没有这个字段，直接补全
+                -- 如果用户有这个字段，但占位符与源码不一致，强制覆盖（防止崩溃）
+                -- 其他情况（占位符一致），保留用户文案
+                -- 老方案或多或少还是有问题，并不能完美同步
+                if user_data[k] == nil or not IsPlaceholderMatch(user_data[k], v) then
+                    user_data[k] = v
                 end
-                if not scheme[func].MAPPINGS.DEFAULT then
-                    scheme[func].MAPPINGS.DEFAULT = DeepCopy(func_value.MAPPINGS.DEFAULT)
+            else
+                if backup_data[k] ~= v then
+                    user_data[k] = v
+                    backup_data[k] = v
                 end
             end
         end
     end
+end
+
+-- 更新方案，每次启动游戏执行同步校验
+GLOBAL.NOMU_QA.UpdateScheme = function(scheme_node)
+    if not scheme_node or not scheme_node.data then return end
+
+    local BUILTIN_LOOKUP = {
+        [GLOBAL.STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME] = GLOBAL.STRINGS.DEFAULT_NOMU_QA,
+        [GLOBAL.STRINGS.NOMU_QA.TITLE_TEXT_CAT_SCHEME] = GLOBAL.STRINGS.CAT_NOMU_QA,
+        [GLOBAL.STRINGS.NOMU_QA.TITLE_TEXT_TSUNDERE_SCHEME] = GLOBAL.STRINGS.TSUNDERE_NOMU_QA,
+        [GLOBAL.STRINGS.NOMU_QA.TITLE_TEXT_CUTE_SCHEME] = GLOBAL.STRINGS.CUTE_NOMU_QA,
+    }
+
+    local is_legacy = false
+    if not scheme_node.source_template and not scheme_node.backup_data then
+        is_legacy = true
+        -- 以默认方案作为比对基准
+        scheme_node.source_template = GLOBAL.STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME
+        scheme_node.backup_data = DeepCopy(GLOBAL.STRINGS.DEFAULT_NOMU_QA)
+    end
+
+    local source_name = scheme_node.source_template or scheme_node.name
+    local source_data = BUILTIN_LOOKUP[source_name] or GLOBAL.STRINGS.DEFAULT_NOMU_QA
+
+    SyncSchemeData(scheme_node.data, scheme_node.backup_data, source_data, is_legacy)
 end
 
 -- 应用宣告方案
@@ -152,12 +190,13 @@ GLOBAL.NOMU_QA.ApplyScheme = function(scheme)
         scheme.data = DeepCopy(GLOBAL.STRINGS.DEFAULT_NOMU_QA)
     end
 
-    GLOBAL.NOMU_QA.UpdateScheme(scheme.data)
+    GLOBAL.NOMU_QA.UpdateScheme(scheme)
     GLOBAL.NOMU_QA.SCHEME = scheme.data
 end
 
+
 -- 本地存储文件路径
-local DATA_FILE = 'mod_config_data/nomu_quick_announce_v3'
+local DATA_FILE = 'mod_config_data/nomu_quick_announce'
 
 -- 通用的数据类型纠正函数
 local function EnsureDataType(template_val, saved_val)
@@ -177,7 +216,7 @@ local function EnsureDataType(template_val, saved_val)
     return template_val
 end
 
--- 加载本地数据
+-- 加载本地数据并执行同步
 GLOBAL.NOMU_QA.LoadData = function()
     TheSim:GetPersistentString(DATA_FILE, function(load_success, str)
         if load_success and #str > 0 then
@@ -190,7 +229,48 @@ GLOBAL.NOMU_QA.LoadData = function()
                 end
             end
         end
-        GLOBAL.NOMU_QA.ApplyScheme(GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME)
+
+        local BUILTIN_SCHEMES = {
+            { name = STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME, source = GLOBAL.STRINGS.DEFAULT_NOMU_QA },
+            { name = STRINGS.NOMU_QA.TITLE_TEXT_CAT_SCHEME, source = GLOBAL.STRINGS.CAT_NOMU_QA },
+            { name = STRINGS.NOMU_QA.TITLE_TEXT_TSUNDERE_SCHEME, source = GLOBAL.STRINGS.TSUNDERE_NOMU_QA },
+            { name = STRINGS.NOMU_QA.TITLE_TEXT_CUTE_SCHEME, source = GLOBAL.STRINGS.CUTE_NOMU_QA }
+        }
+
+        local schemes = GLOBAL.NOMU_QA.DATA.SCHEMES
+        if schemes then
+            --  强制刷新前4个内置方案
+            for i, template in ipairs(BUILTIN_SCHEMES) do
+                if not schemes[i] or schemes[i].name ~= template.name then
+                    local new_scheme = { name = template.name, data = DeepCopy(template.source), version = VERSION }
+                    if not schemes[i] then
+                        schemes[i] = new_scheme
+                    else
+                        table.insert(schemes, i, new_scheme)
+                    end
+                else
+                    schemes[i].data = DeepCopy(template.source)
+                    schemes[i].name = template.name
+                end
+            end
+
+            for i, scheme in ipairs(schemes) do
+                if i > 4 then 
+                    GLOBAL.NOMU_QA.UpdateScheme(scheme)
+                end
+            end
+        end
+
+        local current = GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME
+        if current then
+            for _, template in ipairs(BUILTIN_SCHEMES) do
+                if current.name == template.name then
+                    current.data = DeepCopy(template.source)
+                    break
+                end
+            end
+            GLOBAL.NOMU_QA.ApplyScheme(current)
+        end
     end)
 end
 
@@ -2507,39 +2587,8 @@ modimport('scripts/qa_config/qa_panel.lua')
 
 -- [9] 游戏内系统钩子与事件注入 
 AddSimPostInit(function()
+
     GLOBAL.NOMU_QA.LoadData()
-    local BUILTIN_SCHEMES = {
-        { name = STRINGS.NOMU_QA.TITLE_TEXT_DEFAULT_SCHEME, source = GLOBAL.STRINGS.DEFAULT_NOMU_QA },
-        { name = STRINGS.NOMU_QA.TITLE_TEXT_CAT_SCHEME, source = GLOBAL.STRINGS.CAT_NOMU_QA },
-        { name = STRINGS.NOMU_QA.TITLE_TEXT_TSUNDERE_SCHEME, source = GLOBAL.STRINGS.TSUNDERE_NOMU_QA },
-        { name = STRINGS.NOMU_QA.TITLE_TEXT_CUTE_SCHEME, source = GLOBAL.STRINGS.CUTE_NOMU_QA }
-    }
-
-    local schemes = GLOBAL.NOMU_QA.DATA.SCHEMES
-    for i, template in ipairs(BUILTIN_SCHEMES) do
-        if not schemes[i] or schemes[i].name ~= template.name then
-            local new_scheme = { name = template.name, data = DeepCopy(template.source), version = VERSION }
-            if not schemes[i] then
-                schemes[i] = new_scheme
-            else
-                table.insert(schemes, i, new_scheme)
-            end
-        else
-            schemes[i].data = DeepCopy(template.source)
-            schemes[i].name = template.name
-        end
-    end
-
-    local current = GLOBAL.NOMU_QA.DATA.CURRENT_SCHEME
-    if current then
-        for _, template in ipairs(BUILTIN_SCHEMES) do
-            if current.name == template.name then
-                current.data = DeepCopy(template.source)
-                break
-            end
-        end
-        GLOBAL.NOMU_QA.ApplyScheme(current)
-    end
 
     -- 动态拦截屏幕弹窗
     if GLOBAL.TheFrontEnd and GLOBAL.TheFrontEnd.PushScreen then
