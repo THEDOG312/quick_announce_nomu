@@ -480,20 +480,94 @@ local function CreateEmojiAndPhraseMenu(self, mode)
         end
 
         -- ===== Tab 4: 玩家选择列表 =====
-        local pw, ph = 300, 44
+        local pw, ph = 300, 46
         self.EM_player_list = self.EM_page_4:AddChild(NoMuList(function()
             local item = MakeListItem('player-list-item', pw, ph)
-            item.characterBadge = item:AddChild(PlayerBadge("", GLOBAL.DEFAULT_PLAYER_COLOUR, false, 0))
-            item.characterBadge:SetScale(0.55); item.characterBadge:SetPosition(-pw / 2 + 25, 0, 0)
+            item.focus_forward = nil
 
-            item.text:SetHAlign(GLOBAL.ANCHOR_LEFT); item.text:SetRegionSize(pw - 60, ph); item.text:SetPosition(30, 0, 0)
+            item.characterBadge = item:AddChild(PlayerBadge("", GLOBAL.DEFAULT_PLAYER_COLOUR, false, 0))
+            item.characterBadge:SetScale(0.55)
+            item.characterBadge:SetPosition(-pw / 2 + 25, 0, 0)
+
+            item.text:SetHAlign(GLOBAL.ANCHOR_LEFT)
+            item.text:SetRegionSize(pw - 130, 20)
+            item.text:SetPosition(-5, 9, 0)
+            item.text:SetSize(18)
+
+            item.kuid_btn = item:AddChild(TextButton())
+            item.kuid_btn:SetFont(GLOBAL.CHATFONT)
+            item.kuid_btn:SetTextSize(13)
+            item.kuid_btn:SetTextColour({0.75, 0.75, 0.75, 1})
+            item.kuid_btn:SetTextFocusColour(GLOBAL.UICOLOURS.GOLD)
+            if item.kuid_btn.text then
+                item.kuid_btn.text:SetHAlign(GLOBAL.ANCHOR_LEFT)
+                item.kuid_btn.text:SetRegionSize(pw - 130, 16)
+            end
+            item.kuid_btn:SetPosition(-5, -11, 0)
+            if S and S.TOOLTIP_KUID then
+                item.kuid_btn:SetHoverText(S.TOOLTIP_KUID)
+            end
+
+            -- 摸摸按钮
+            local momo_label = (S and S.BTN_MOMO)
+            item.momo_btn = item:AddChild(ImageButton("images/global_redux.xml", "button_carny_long_normal.tex", "button_carny_long_hover.tex", "button_carny_long_disabled.tex", "button_carny_long_down.tex"))
+            item.momo_btn:SetFont(GLOBAL.CHATFONT)
+            item.momo_btn:SetText(momo_label)
+            item.momo_btn:SetTextSize(18)
+            item.momo_btn.text:SetColour(0, 0, 0, 1)
+            item.momo_btn:ForceImageSize(55, 28)
+            item.momo_btn:SetPosition(pw / 2 - 35, 0, 0)
+            if S and S.TOOLTIP_MOMO then
+                item.momo_btn:SetHoverText(S.TOOLTIP_MOMO)
+            end
 
             item.SetInfo = function(_, client)
-                item.text:SetString(client.name); item.text:SetColour(unpack(client.colour or GLOBAL.DEFAULT_PLAYER_COLOUR))
+                item.client = client
+                item.text:SetString(client.name)
+                item.text:SetColour(unpack(client.colour or GLOBAL.DEFAULT_PLAYER_COLOUR))
                 item.characterBadge:Set(client.prefab or "", client.colour or GLOBAL.DEFAULT_PLAYER_COLOUR, client.performance ~= nil, client.userflags or 0, client.base_skin)
-                item.backing:SetOnClick(function()
-                    InsertText("@" .. client.name .. " "); SwitchToTab(2); self.RestoreInputFocus()
+                local display_kuid = client.userid or ""
+                item.kuid_btn:SetText(display_kuid)
+
+                item.kuid_btn:SetOnClick(function()
+                    local qa_player = GLOBAL.NOMU_QA and GLOBAL.NOMU_QA.SCHEME and GLOBAL.NOMU_QA.SCHEME.PLAYER
+                    local fmt = (qa_player and qa_player.FORMATS and qa_player.FORMATS.KUID)
+                        or (GLOBAL.STRINGS.DEFAULT_NOMU_QA and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER.FORMATS and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER.FORMATS.KUID)
+                        or "{NAME} 的 KUID 是 {KUID}。"
+                    Announce(GLOBAL.subfmt(fmt, { NAME = client.name, KUID = display_kuid }))
+                    if GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE and mode == "chat" then
+                        if type(self.Close) == "function" then self:Close() else GLOBAL.TheFrontEnd:PopScreen(self) end
+                    else
+                        self.RestoreInputFocus()
+                    end
                 end)
+
+                item.backing:SetOnClick(function()
+                    InsertText("@" .. client.name .. " ")
+                    SwitchToTab(2)
+                    self.RestoreInputFocus()
+                end)
+
+                local old_OnMouseButton = item.momo_btn.OnMouseButton
+                item.momo_btn.OnMouseButton = function(self_btn, button, down, x, y)
+                    if not down then
+                        if button == GLOBAL.MOUSEBUTTON_LEFT or button == GLOBAL.MOUSEBUTTON_RIGHT then
+                            local is_whisper = (button == GLOBAL.MOUSEBUTTON_RIGHT)
+                            if GLOBAL.NOMU_QA.SendMomoChatMessage then
+                                GLOBAL.NOMU_QA.SendMomoChatMessage(client.userid, client.name, is_whisper)
+                            end
+                            if self.EM_bg then self.EM_bg:Hide() end
+                            if GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE and mode == "chat" then
+                                if type(self.Close) == "function" then self:Close() else GLOBAL.TheFrontEnd:PopScreen(self) end
+                            else
+                                self.RestoreInputFocus()
+                            end
+                            return true
+                        end
+                    end
+                    if old_OnMouseButton then return old_OnMouseButton(self_btn, button, down, x, y) end
+                    return false
+                end
             end
             return item
         end, 0, 10, pw, ph, 1, 6))

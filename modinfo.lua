@@ -10,12 +10,12 @@ description = [[
 - 增加对暖石温度状态、月相、时钟、降水宣告的支持
 - “shift + alt + 鼠标左键点击世界物品”宣告附近的物品
 - “shift + alt + 鼠标中键”对自己宣告Ping、对别人打招呼、显示物品信息
-- Meme表情包来自于“驯猫糕手”
+- Meme表情包来自于“驯猫糕手”，摸摸功能来源于“Guto”
 - 添加了自定义宣告同步功能
 - 兼容了 macOS
 ]]
 
-version = "2026-09-7"
+version = "2026-09-17"
 
 folder_name = folder_name or "quick_announce_nomu"
 if not folder_name:find("workshop-") then

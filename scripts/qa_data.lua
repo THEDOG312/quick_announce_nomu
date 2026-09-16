@@ -44,7 +44,7 @@ _G.NOMU_QA.DATA = {
     SHOW_ME = 1,
     ANNOUNCE_RANGE = 40,
     FUZZY_ANNOUNCE = false,
-    DISABLE_MEME_PREVIEW = false,
+    DISABLE_MEME_PREVIEW = true,
     SHOW_DISTANCE = 0,
     SHOW_MOD_NAME = false,
     SHOW_ASSET_INFO = 0,
@@ -89,6 +89,35 @@ local function MergeTables(dst, src)
     end
 end
 
+-- 递归补全缺失语句
+local function FillMissingData(dst, src)
+    if type(src) ~= "table" or type(dst) ~= "table" then return false end
+    local changed = false
+    for k, v in pairs(src) do
+        if dst[k] == nil then
+            dst[k] = (type(v) == "table") and DeepCopy(v) or v
+            changed = true
+        elseif type(dst[k]) == "table" and type(v) == "table" then
+            if FillMissingData(dst[k], v) then
+                changed = true
+            end
+        end
+    end
+    return changed
+end
+
+local function SyncScheme(scheme)
+    if not scheme or type(scheme) ~= "table" then return false end
+    if not scheme.data or type(scheme.data) ~= "table" then
+        scheme.data = DeepCopy(_G.STRINGS.DEFAULT_NOMU_QA)
+        return true
+    end
+    return FillMissingData(scheme.data, _G.STRINGS.DEFAULT_NOMU_QA)
+end
+
+_G.NOMU_QA.FillMissingData = FillMissingData
+_G.NOMU_QA.SyncScheme = SyncScheme
+
 local function GetMergedBuiltin(target_source)
     local merged = DeepCopy(_G.STRINGS.DEFAULT_NOMU_QA)
     if target_source and target_source ~= _G.STRINGS.DEFAULT_NOMU_QA then
@@ -102,6 +131,8 @@ _G.NOMU_QA.ApplyScheme = function(scheme)
     if not scheme.data then
         print("[NoMu QA] 检测到方案数据丢失，已自动修复坏档！")
         scheme.data = DeepCopy(_G.STRINGS.DEFAULT_NOMU_QA)
+    else
+        SyncScheme(scheme)
     end
     _G.NOMU_QA.SCHEME = scheme.data
 end

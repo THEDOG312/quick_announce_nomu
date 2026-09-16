@@ -313,7 +313,7 @@ end
 -- 3.6 方案映射与徽章宣告辅助
 ----------------------------------------
 
--- 根据当前角色和类别获取映射文本（支持角色专属配置）
+-- 根据当前角色和类别获取映射文本
 local function GetMapping(qa, category, key)
     local prefab = ThePlayer.prefab:upper()
     if GLOBAL.NOMU_QA.DATA.CHARACTER_SPECIFIC
@@ -330,15 +330,14 @@ local function AnnounceBadge(qa, current, max, category, qa_key, custom_fmt_key)
     local fmts = {
         CURRENT = math.floor(current + 0.5),
         MAX = max,
-        MESSAGE = GetMapping(qa, 'MESSAGE', category)
+        MESSAGE = GetMapping(qa, 'MESSAGE', category) or ""
     }
 
-    -- 优先使用拥有的表情符号，否则回退到文本符号
     local emoji_key = GetMapping(qa, 'SYMBOL', 'EMOJI')
-    if emoji_key and TheInventory:CheckOwnership('emoji_' .. emoji_key) then
+    if emoji_key and emoji_key ~= "" and TheInventory:CheckOwnership('emoji_' .. emoji_key) then
         fmts.SYMBOL = ':' .. emoji_key .. ':'
     else
-        fmts.SYMBOL = GetMapping(qa, 'SYMBOL', 'TEXT')
+        fmts.SYMBOL = GetMapping(qa, 'SYMBOL', 'TEXT') or ""
     end
 
     local fmt_key = custom_fmt_key or 'DEFAULT'
@@ -3166,6 +3165,9 @@ GLOBAL.NOMU_QA.Announce = Announce
 -- 导入表情包模块
 modimport('scripts/qa_meme.lua')
 
+-- 导入摸摸模块
+modimport('scripts/qa_momo.lua')
+
 -- 导入设置面板 UI
 modimport('scripts/qa_panel.lua')
 
@@ -3837,11 +3839,24 @@ HookClassAltAccept('widgets/redux/skilltreebuilder', function(self)
         if v.button and v.button.focus and v.status
             and self.skilltreedef and self.skilltreedef[k] and self.skilltreedef[k].title then
 
-            local fmt_name = v.status.activated and "ACTIVATED"
-                or (v.status.activatable and "CAN_ACTIVATE" or "NOT_ACTIVATED")
+            local node_def = self.skilltreedef[k]
+            local fmt_name = "NOT_ACTIVATED"
+            if v.status.lock or node_def.lock_open then
+                fmt_name = (v.status.lock_open == true) and "ACTIVATED" or "NOT_ACTIVATED"
+            elseif not node_def.infographic then
+                if v.status.activated then
+                    fmt_name = "ACTIVATED"
+                elseif v.status.activatable then
+                    fmt_name = "CAN_ACTIVATE"
+                else
+                    fmt_name = "NOT_ACTIVATED"
+                end
+            else
+                fmt_name = "ACTIVATED"
+            end
 
             return Announce(subfmt(GLOBAL.NOMU_QA.SCHEME.SKILL_TREE.FORMATS[fmt_name], {
-                NAME = name, SKILL = self.skilltreedef[k].title
+                NAME = name, SKILL = node_def.title
             }), nil, nil, GetStatementLoc("SKILL_TREE", fmt_name))
         end
     end

@@ -218,6 +218,9 @@ EMOJI_MENU = {
         MEME_GIF = "动图",
         ON = "已开启",
         OFF = "已关闭",
+        BTN_MOMO = "摸摸",
+        TOOLTIP_MOMO = STRINGS.LMB .. "公开摸摸 " .. STRINGS.RMB .. "私聊摸摸",
+        TOOLTIP_KUID = STRINGS.LMB .. "宣告 KUID",
     },
 
     FUNC = {
@@ -491,6 +494,8 @@ GLOBAL.STRINGS.DEFAULT_NOMU_QA = {
             PERF = '{NAME} 的网络连接 {STATUS}。{PING}',
             GREET = '你好呀，{NAME}。',
             PING = 'Ping: {PING}',
+            KUID = '{NAME} 的 KUID 是 {KUID}。',
+            MOMO = '摸了摸 {NAME}。',
             BADGE = '{NAME} 的头像是 {BADGE}。',
             BACKGROUND = '{NAME} 的背景是 {BACKGROUND}。',
             BODY = '{NAME} 的身体皮肤是 {BODY}。',
@@ -545,6 +550,11 @@ GLOBAL.STRINGS.DEFAULT_NOMU_QA = {
             NOT_ACTIVATED = '{NAME} 还没有点亮技能：{SKILL}。',
             XP = '{NAME} 还有 {XP} 点洞察。',
             DESC = '{NAME} 的 {SKILL} 技能可以<{DESC}>',
+            -- 沃拓克斯专属倾向文案
+            WORTOX_TENDENCY_FULL = '{NAME} 的 {SKILL} 已完全满溢！',
+            WORTOX_TENDENCY_HALF = '{NAME} 的 {SKILL} 正在逐渐累积（进度：{DIFF}/{MAX}）。',
+            WORTOX_TENDENCY_EMPTY = '{NAME} 的 {SKILL} 目前空空如也。',
+            WORTOX_TENDENCY_BALANCED = '{NAME} 的 {SKILL} 目前处于平衡状态。',
         },
         MAPPINGS = {}
     },

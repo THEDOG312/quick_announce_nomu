@@ -781,8 +781,7 @@ GLOBAL.STRINGS.TSUNDERE_NOMU_QA = {
                     STAGE_5 = '感觉要谢了！烦死了……',
                 },
                 SYMBOL = {
-                    EMOJI = 'flower',
-                    TEXT = '绽放状态'
+                    TEXT = '绽放值'
                 }
             }
         }

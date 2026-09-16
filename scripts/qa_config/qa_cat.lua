@@ -806,8 +806,7 @@ GLOBAL.STRINGS.CAT_NOMU_QA = {
                     STAGE_5 = '花花要谢了喵󰀍～',
                 },
                 SYMBOL = {
-                    EMOJI = 'flower',
-                    TEXT = '绽放状态'
+                    TEXT = '绽放值'
                 }
             }
         }
