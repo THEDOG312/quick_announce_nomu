@@ -87,12 +87,14 @@ local function SpawnMomoFX(target, tool_index)
     local fx = GLOBAL.CreateEntity()
     fx.entity:AddTransform()
     fx.entity:AddAnimState()
-    fx.entity:AddSoundEmitter()
 
     fx.AnimState:SetBank("handpet")
     fx.AnimState:SetBuild("handpet")
     fx.AnimState:PlayAnimation(data.anim)
-    pcall(function() fx.SoundEmitter:PlaySound(data.sound) end)
+
+    if target.SoundEmitter then
+        pcall(function() target.SoundEmitter:PlaySound(data.sound) end)
+    end
 
     fx.Transform:SetScale(data.scale, data.scale, data.scale)
     fx.Transform:SetNoFaced()
@@ -160,19 +162,18 @@ GLOBAL.NOMU_QA.SendMomoChatMessage = SendMomoChatMessage
 local oldNetworking_Say = GLOBAL.Networking_Say
 GLOBAL.Networking_Say = function(guid, userid, name, prefab, message, colour, whisper, isemote, user_vanity)
     if type(message) == "string" then
-        local target_uid, tool_idx = string.match(message, "%[Momo:([%w_]+):?(%d*)%]")
+        local target_uid, tool_idx = string.match(message, "%[Momo:([^%]:%s]+):?(%d*)%]")
         if target_uid then
             local target_player = FindPlayerByUserID(target_uid)
             if target_player then
                 PlayMomo(target_player, tonumber(tool_idx))
             end
-            message = message:gsub("%s*%[Momo:[%w_]+:?%d*%]", "")
+            message = message:gsub("%s*%[Momo:[^%]]+]", "")
             if message == "" then
                 local client = GLOBAL.TheNet and GLOBAL.TheNet.GetClientTableForUser and GLOBAL.TheNet:GetClientTableForUser(target_uid)
-                local target_name = client and client.name or "你"
+                local target_name = client and client.name
                 local template = (GLOBAL.NOMU_QA and GLOBAL.NOMU_QA.SCHEME and GLOBAL.NOMU_QA.SCHEME.PLAYER and GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS and GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.MOMO)
                     or (GLOBAL.STRINGS.DEFAULT_NOMU_QA and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER.FORMATS and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER.FORMATS.MOMO)
-                    or "摸了摸 {NAME}。"
                 message = GLOBAL.subfmt(template, { NAME = target_name })
             end
         end

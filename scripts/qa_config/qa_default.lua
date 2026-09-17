@@ -550,11 +550,6 @@ GLOBAL.STRINGS.DEFAULT_NOMU_QA = {
             NOT_ACTIVATED = '{NAME} 还没有点亮技能：{SKILL}。',
             XP = '{NAME} 还有 {XP} 点洞察。',
             DESC = '{NAME} 的 {SKILL} 技能可以<{DESC}>',
-            -- 沃拓克斯专属倾向文案
-            WORTOX_TENDENCY_FULL = '{NAME} 的 {SKILL} 已完全满溢！',
-            WORTOX_TENDENCY_HALF = '{NAME} 的 {SKILL} 正在逐渐累积（进度：{DIFF}/{MAX}）。',
-            WORTOX_TENDENCY_EMPTY = '{NAME} 的 {SKILL} 目前空空如也。',
-            WORTOX_TENDENCY_BALANCED = '{NAME} 的 {SKILL} 目前处于平衡状态。',
         },
         MAPPINGS = {}
     },
