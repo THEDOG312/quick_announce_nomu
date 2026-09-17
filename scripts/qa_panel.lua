@@ -553,12 +553,17 @@ local function CreateEmojiAndPhraseMenu(self, mode)
                     if not down then
                         if button == GLOBAL.MOUSEBUTTON_LEFT or button == GLOBAL.MOUSEBUTTON_RIGHT then
                             local is_whisper = (button == GLOBAL.MOUSEBUTTON_RIGHT)
+                            local success = false
                             if GLOBAL.NOMU_QA.SendMomoChatMessage then
-                                GLOBAL.NOMU_QA.SendMomoChatMessage(client.userid, client.name, is_whisper)
+                                success = GLOBAL.NOMU_QA.SendMomoChatMessage(client.userid, client.name, is_whisper)
                             end
-                            if self.EM_bg then self.EM_bg:Hide() end
-                            if GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE and mode == "chat" then
-                                if type(self.Close) == "function" then self:Close() else GLOBAL.TheFrontEnd:PopScreen(self) end
+                            if success then
+                                if self.EM_bg then self.EM_bg:Hide() end
+                                if GLOBAL.NOMU_QA.DATA.FREQ_AUTO_CLOSE and mode == "chat" then
+                                    if type(self.Close) == "function" then self:Close() else GLOBAL.TheFrontEnd:PopScreen(self) end
+                                else
+                                    self.RestoreInputFocus()
+                                end
                             else
                                 self.RestoreInputFocus()
                             end

@@ -221,6 +221,7 @@ EMOJI_MENU = {
         BTN_MOMO = "摸摸",
         TOOLTIP_MOMO = STRINGS.LMB .. "公开摸摸 " .. STRINGS.RMB .. "私聊摸摸",
         TOOLTIP_KUID = STRINGS.LMB .. "宣告 KUID",
+        MOMO_CD_HINT = "摸得太频繁啦，休息 {TIME} 秒再摸吧！",
     },
 
     FUNC = {

@@ -145,16 +145,51 @@ local function FindPlayerByUserID(uid)
     return nil
 end
 
+local MOMO_MAX_BURST = 3   -- 允许连续摸摸的最大次数
+local MOMO_RESET_TIME = 3  -- 停手后重置连击计数的间隔
+local MOMO_CD = 10         -- 连摸达到上限后的冷却时长
+
+local momo_count = 0
+local last_momo_time = 0
+local cd_end_time = 0
+
 -- 发送摸摸网络聊天信息
 local function SendMomoChatMessage(target_userid, target_name, whisper)
+    local cur_time = GLOBAL.GetTime()
+    if cur_time < cd_end_time then
+        local remain = math.ceil(cd_end_time - cur_time)
+        if GLOBAL.ThePlayer and GLOBAL.ThePlayer.components.talker then
+            local S = GLOBAL.STRINGS.NOMU_QA and GLOBAL.STRINGS.NOMU_QA.EMOJI_MENU
+            local hint = (S and S.MOMO_CD_HINT)
+                or (GLOBAL.STRINGS.NOMU_QA and GLOBAL.STRINGS.NOMU_QA.MOMO_CD_HINT)
+            GLOBAL.ThePlayer.components.talker:Say(GLOBAL.subfmt(hint, { TIME = remain }))
+        end
+        return false
+    end
+
+    if cur_time - last_momo_time > MOMO_RESET_TIME then
+        momo_count = 0
+    end
+
     if GLOBAL.TheNet and target_userid then
+        momo_count = momo_count + 1
+        last_momo_time = cur_time
+
+        if momo_count >= MOMO_MAX_BURST then
+            cd_end_time = cur_time + MOMO_CD
+            momo_count = 0
+        end
+
         local tool_idx = math.random(1, #HANDPET)
         local template = (GLOBAL.NOMU_QA and GLOBAL.NOMU_QA.SCHEME and GLOBAL.NOMU_QA.SCHEME.PLAYER and GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS and GLOBAL.NOMU_QA.SCHEME.PLAYER.FORMATS.MOMO)
             or (GLOBAL.STRINGS.DEFAULT_NOMU_QA and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER.FORMATS and GLOBAL.STRINGS.DEFAULT_NOMU_QA.PLAYER.FORMATS.MOMO)
         local action_text = GLOBAL.subfmt(template, { NAME = target_name or "" })
         local msg = string.format("%s [Momo:%s:%d]", action_text, target_userid, tool_idx)
         GLOBAL.TheNet:Say(msg, whisper == true)
+        return true
     end
+
+    return false
 end
 
 GLOBAL.NOMU_QA.SendMomoChatMessage = SendMomoChatMessage

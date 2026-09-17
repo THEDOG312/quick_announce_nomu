@@ -41,7 +41,7 @@ local LIST_DATA = {
     List_8 = { title = "喜羊羊", atlas = "images/meme/xiyy.xml", prefix = "xiyy" },
     List_9 = { title = "蜜桃猫", atlas = "images/meme/mtcat.xml", prefix = "mtcat" },
     List_10 = { title = "嘉然", atlas = "images/meme/jiaran.xml", prefix = "jiaran" },
-    List_11 = { title = "Dora", atlas = "images/meme/dora.xml", prefix = "dora" },
+    List_11 = { title = "Doro", atlas = "images/meme/dora.xml", prefix = "dora" },
 }
 
 GLOBAL.NOMU_QA.MEME_LIST = LIST
