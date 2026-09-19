@@ -508,7 +508,7 @@ local function CreateEmojiAndPhraseMenu(self, mode)
                 item.kuid_btn:SetHoverText(S.TOOLTIP_KUID)
             end
 
-            -- 摸摸按钮
+            --[[ -- 摸摸按钮
             local momo_label = (S and S.BTN_MOMO)
             item.momo_btn = item:AddChild(ImageButton("images/global_redux.xml", "button_carny_long_normal.tex", "button_carny_long_hover.tex", "button_carny_long_disabled.tex", "button_carny_long_down.tex"))
             item.momo_btn:SetFont(GLOBAL.CHATFONT)
@@ -520,6 +520,7 @@ local function CreateEmojiAndPhraseMenu(self, mode)
             if S and S.TOOLTIP_MOMO then
                 item.momo_btn:SetHoverText(S.TOOLTIP_MOMO)
             end
+            --]]
 
             item.SetInfo = function(_, client)
                 item.client = client
@@ -548,6 +549,7 @@ local function CreateEmojiAndPhraseMenu(self, mode)
                     self.RestoreInputFocus()
                 end)
 
+                --[[ -- 临时隐藏
                 local old_OnMouseButton = item.momo_btn.OnMouseButton
                 item.momo_btn.OnMouseButton = function(self_btn, button, down, x, y)
                     if not down then
@@ -573,6 +575,7 @@ local function CreateEmojiAndPhraseMenu(self, mode)
                     if old_OnMouseButton then return old_OnMouseButton(self_btn, button, down, x, y) end
                     return false
                 end
+                --]]
             end
             return item
         end, 0, 10, pw, ph, 1, 6))

@@ -17,7 +17,7 @@ local LIST = {
     List_6 = {}, List_7 = {}, List_8 = {}, List_9 = {}, List_10 = {},
     List_11 = {}
 }
-for i = 1, 180 do table.insert(LIST.List_1, "zayu_"..i) end
+for i = 1, 182 do table.insert(LIST.List_1, "zayu_"..i) end
 for i = 1, 80  do table.insert(LIST.List_2, "feibi_"..i) end
 for i = 1, 101 do table.insert(LIST.List_3, "hewu_"..i) end
 for i = 1, 165  do table.insert(LIST.List_4, "chaijun_"..i) end
